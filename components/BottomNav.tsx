@@ -1,24 +1,16 @@
 
 import React from 'react';
-import { PlusCircleIcon, DemoIcon, ExportIcon } from './Icons';
+import { PlusCircleIcon, ExportIcon } from './Icons';
 
 interface BottomNavProps {
     onAddNew: () => void;
-    onGenerateDemo: () => void;
     onExport: () => void;
 }
 
-const BottomNav: React.FC<BottomNavProps> = ({ onAddNew, onGenerateDemo, onExport }) => {
+const BottomNav: React.FC<BottomNavProps> = ({ onAddNew, onExport }) => {
     return (
         <footer className="md:hidden fixed bottom-0 left-0 right-0 bg-ivory/95 backdrop-blur-sm border-t border-primary-gold/20 shadow-lg z-40">
             <div className="flex justify-around items-center h-16">
-                <button 
-                    onClick={onGenerateDemo} 
-                    className="flex flex-col items-center justify-center text-text-main/80 hover:text-accent-maroon transition-colors"
-                >
-                    <DemoIcon />
-                    <span className="text-xs mt-1">Demo</span>
-                </button>
                 <button 
                     onClick={onAddNew}
                     className="flex flex-col items-center justify-center text-text-main/80 hover:text-accent-maroon transition-colors -mt-8"

@@ -6,8 +6,7 @@ import { useDebounce } from './hooks/useDebounce';
 import TransactionTable from './components/TransactionTable';
 import SearchBar from './components/SearchBar';
 import { Header } from './components/Header';
-import { PlusIcon, ExportIcon, DemoIcon, JournalIcon } from './components/Icons';
-import { demoTransactions } from './demo-data';
+import { PlusIcon, ExportIcon, JournalIcon } from './components/Icons';
 import BottomNav from './components/BottomNav';
 
 // Lazy load modal components to reduce initial bundle size.
@@ -25,7 +24,6 @@ const SuspenseFallback = () => (
 // Define a type for managing all modals from a single state object.
 type ModalType =
   | { type: 'TRANSACTION_FORM'; transaction: Transaction | null }
-  | { type: 'CONFIRM_DEMO' }
   | { type: 'CONFIRM_DELETE'; transactionId: string }
   | { type: 'SETTINGS' };
 
@@ -35,16 +33,16 @@ const App: React.FC = () => {
     const [activeModal, setActiveModal] = useState<ModalType | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [purityFilter, setPurityFilter] = useState('All');
-    const [confirmationMessage, setConfirmationMessage] = useState<string | null>(null);
+    const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
     const [sheetsUrl, setSheetsUrl] = useLocalStorage<string>('sheetsUrl', '');
 
     // Debounce search term to avoid re-filtering on every keystroke.
     const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
-    const showConfirmation = (message: string) => {
-        setConfirmationMessage(message);
+    const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+        setNotification({ message, type });
         setTimeout(() => {
-            setConfirmationMessage(null);
+            setNotification(null);
         }, 3000);
     };
     
@@ -57,15 +55,12 @@ const App: React.FC = () => {
             await fetch(sheetsUrl, {
                 method: 'POST',
                 mode: 'no-cors',
-                headers: {
-                    'Content-Type': 'text/plain;charset=utf-8',
-                },
                 body: JSON.stringify({ action, transaction }),
             });
             console.log(`Sync request sent: ${action} for ${transaction.id}`);
         } catch (error) {
             console.error('Failed to sync with Google Sheets:', error);
-            showConfirmation('Error: Failed to sync data.');
+            showNotification('Google Sheets sync failed. Check URL or connection.', 'error');
         }
     }, [sheetsUrl]);
 
@@ -80,10 +75,10 @@ const App: React.FC = () => {
 
         if (isEditing) {
             setTransactions(transactions.map(t => t.id === transaction.id ? transaction : t));
-            showConfirmation('Data updated successfully!');
+            showNotification('Data updated successfully!');
         } else {
             setTransactions([transaction, ...transactions]);
-            showConfirmation('New entry added successfully!');
+            showNotification('New entry added successfully!');
         }
         syncWithGoogleSheet(transaction, 'SAVE');
         setActiveModal(null);
@@ -125,34 +120,12 @@ Status: ${transaction.status}
             const transactionToDelete = transactions.find(t => t.id === transactionId);
             setTransactions(transactions.filter(t => t.id !== transactionId));
             setActiveModal(null);
-            showConfirmation('Entry deleted successfully!');
+            showNotification('Entry deleted successfully!');
             if (transactionToDelete) {
                 syncWithGoogleSheet(transactionToDelete, 'DELETE');
             }
         }
     }, [activeModal, transactions, syncWithGoogleSheet, setTransactions]);
-
-    const handleGenerateDemoData = useCallback(() => {
-        const newTransactions = demoTransactions.map((t, index) => ({
-            ...t,
-            id: `demo-${Date.now()}-${index}`,
-        }));
-
-        setTransactions(prev => [...newTransactions, ...prev]);
-
-        const demoNames = [...new Set(demoTransactions.map(t => t.name))];
-        const existingNames = new Set(customers.map(c => c.name));
-        const newCustomers = demoNames
-            .filter(name => !existingNames.has(name))
-            .map(name => ({ name, phone: '' }));
-
-        if (newCustomers.length > 0) {
-            setCustomers(prev => [...prev, ...newCustomers].sort((a,b) => a.name.localeCompare(b.name)));
-        }
-
-        setActiveModal(null);
-        showConfirmation('5 demo entries have been added!');
-    }, [customers, setTransactions, setCustomers]);
 
     const handleExportData = useCallback(() => {
         if (transactions.length === 0) {
@@ -224,7 +197,7 @@ Status: ${transaction.status}
 
     const handleSaveSettings = useCallback((url: string) => {
         setSheetsUrl(url);
-        showConfirmation(url ? 'Google Sheets sync enabled!' : 'Google Sheets sync disabled.');
+        showNotification(url ? 'Google Sheets sync enabled!' : 'Google Sheets sync disabled.');
     }, [setSheetsUrl]);
 
     const handleSaveNewCustomer = useCallback((newCustomer: { name: string, phone: string }) => {
@@ -238,7 +211,6 @@ Status: ${transaction.status}
     const handleAddNew = useCallback(() => setActiveModal({ type: 'TRANSACTION_FORM', transaction: null }), []);
     const handleCancelModal = useCallback(() => setActiveModal(null), []);
     const handleOpenSettings = useCallback(() => setActiveModal({ type: 'SETTINGS' }), []);
-    const handleConfirmDemo = useCallback(() => setActiveModal({ type: 'CONFIRM_DEMO' }), []);
 
     return (
         <div className="min-h-screen pb-24 md:pb-0">
@@ -251,15 +223,6 @@ Status: ${transaction.status}
                             onClose={handleCancelModal}
                             onSave={handleSaveSettings}
                             initialUrl={sheetsUrl}
-                        />
-                    )}
-                    {activeModal?.type === 'CONFIRM_DEMO' && (
-                        <ConfirmationDialog
-                            isOpen={true}
-                            onClose={handleCancelModal}
-                            onConfirm={handleGenerateDemoData}
-                            title="Generate Demo Entries"
-                            message="This will add 5 sample entries to demonstrate the app's features. Your existing data will not be affected. Continue?"
                         />
                     )}
                     {activeModal?.type === 'CONFIRM_DELETE' && (
@@ -284,9 +247,9 @@ Status: ${transaction.status}
                     )}
                 </Suspense>
 
-                {confirmationMessage && (
-                    <div className="fixed top-24 right-4 bg-green-600 text-white py-2 px-4 rounded-lg shadow-lg animate-fade-in-out z-50">
-                        {confirmationMessage}
+                {notification && (
+                    <div className={`fixed top-24 right-4 ${notification.type === 'success' ? 'bg-green-600' : 'bg-highlight-red'} text-white py-2 px-4 rounded-lg shadow-lg animate-fade-in-out z-50`}>
+                        {notification.message}
                     </div>
                 )}
                 
@@ -297,13 +260,6 @@ Status: ${transaction.status}
                     >
                         <PlusIcon />
                         Add New Entry
-                    </button>
-                    <button
-                        onClick={handleConfirmDemo}
-                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-accent-maroon text-ivory font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg hover:opacity-90 transition-all transform hover:-translate-y-0.5"
-                    >
-                        <DemoIcon />
-                        Generate Demo Entries
                     </button>
                     <button
                         onClick={handleExportData}
@@ -335,7 +291,7 @@ Status: ${transaction.status}
                             <JournalIcon className="mx-auto h-24 w-24 text-primary-gold/30" />
                             <h3 className="mt-4 text-xl font-semibold text-text-main">Your Journal is Empty</h3>
                             <p className="mt-2 text-base text-text-main/70">
-                                Start by adding your first transaction or load sample data to see how it works.
+                                Start by adding your first transaction.
                             </p>
                             <div className="mt-8 flex justify-center gap-4">
                                 <button
@@ -344,13 +300,6 @@ Status: ${transaction.status}
                                 >
                                     <PlusIcon />
                                     Add New Entry
-                                </button>
-                                <button
-                                    onClick={handleConfirmDemo}
-                                    className="inline-flex items-center justify-center gap-2 bg-accent-maroon text-ivory font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg hover:opacity-90 transition-all transform hover:-translate-y-0.5"
-                                >
-                                    <DemoIcon />
-                                    Generate Demo
                                 </button>
                             </div>
                         </div>
@@ -361,7 +310,6 @@ Status: ${transaction.status}
             {activeModal?.type !== 'TRANSACTION_FORM' && (
                 <BottomNav 
                     onAddNew={handleAddNew}
-                    onGenerateDemo={handleConfirmDemo}
                     onExport={handleExportData}
                 />
             )}

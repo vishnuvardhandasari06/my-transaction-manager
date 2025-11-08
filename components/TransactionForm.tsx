@@ -149,7 +149,9 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
                 return prev;
             }
 
-            let newStatus = prev.status;
+            // FIX: Explicitly type `newStatus` as `TransactionStatus` to prevent type narrowing
+            // by control flow analysis, which was causing assignment errors below.
+            let newStatus: TransactionStatus = prev.status;
 
             // When weight is given but not returned, status is 'Not Returned'.
             if (given !== null && given > 0 && (returned === null || returned <= 0)) {
