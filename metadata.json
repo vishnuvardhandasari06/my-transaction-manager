@@ -1,0 +1,5 @@
+{
+  "name": "Shop Transaction Manager",
+  "description": "A mobile-friendly web application to enter and edit shop transaction data. All data is stored locally in your browser.",
+  "requestFramePermissions": []
+}
