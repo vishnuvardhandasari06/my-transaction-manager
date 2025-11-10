@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useCallback, lazy, Suspense, useEffect } from 'react';
 import { Transaction, Customer, Item } from './types';
 import { useLocalStorage } from './hooks/useLocalStorage';
@@ -40,14 +39,14 @@ const App: React.FC = () => {
 
     const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
-    const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+    const showNotification = useCallback((message: string, type: 'success' | 'error' = 'success') => {
         setNotification({ message, type });
         setTimeout(() => {
             setNotification(null);
-        }, 3000);
-    };
+        }, 8000); // Increased timeout for better readability of complex error messages
+    }, []);
 
-    const fetchData = useCallback(async () => {
+    const fetchData = useCallback(async (options?: { quiet?: boolean }) => {
         if (!sheetsUrl) {
             setLoading(false);
             return;
@@ -55,22 +54,33 @@ const App: React.FC = () => {
         setLoading(true);
         try {
             const response = await fetch(sheetsUrl);
-            if (!response.ok) throw new Error('Network response was not ok. Check script deployment permissions.');
-            const { transactions: fetchedTransactions, customers: fetchedCustomers, items: fetchedItems } = await response.json();
+            if (!response.ok) throw new Error(`Network response was not ok (${response.status}). Check script deployment permissions.`);
             
-            // Ensure data is in the correct format before setting state
+            const data = await response.json();
+            const { transactions: fetchedTransactions, customers: fetchedCustomers, items: fetchedItems } = data;
+            
             setTransactions(Array.isArray(fetchedTransactions) ? fetchedTransactions : []);
             setCustomers(Array.isArray(fetchedCustomers) ? fetchedCustomers : []);
             setItems(Array.isArray(fetchedItems) ? fetchedItems : []);
             
-            showNotification('Data synced with Google Sheets.', 'success');
-        } catch (error) {
+            if (!options?.quiet) {
+                showNotification('Data synced with Google Sheets.', 'success');
+            }
+        } catch (error: any) {
             console.error('Failed to fetch data from Google Sheets:', error);
-            showNotification('Failed to load data. Check Sheets URL or script setup.', 'error');
+            let errorMessage = 'Failed to load data. Check the Sheets URL and your internet connection.';
+            if (error instanceof TypeError) { // This often indicates a CORS or network issue
+                errorMessage = 'Network Error: Could not fetch data. This is likely a CORS issue. Please carefully check the Google Apps Script deployment instructions in Settings.';
+            } else if (error instanceof SyntaxError) {
+                errorMessage = 'Failed to parse data from Google Sheets. The script might not be returning valid JSON.';
+            } else if (error.message.includes('Network response was not ok')) {
+                errorMessage = 'Connection to Google Sheets failed. Please verify your Web App URL and check script deployment permissions.';
+            }
+            showNotification(errorMessage, 'error');
         } finally {
             setLoading(false);
         }
-    }, [sheetsUrl]);
+    }, [sheetsUrl, showNotification]);
 
     useEffect(() => {
         fetchData();
@@ -83,25 +93,45 @@ const App: React.FC = () => {
         }
         setLoading(true);
         try {
-            await fetch(sheetsUrl, {
+            const response = await fetch(sheetsUrl, {
                 method: 'POST',
-                mode: 'no-cors',
                 headers: {
-                    'Content-Type': 'text/plain;charset=utf-8',
+                    // IMPORTANT: Use 'text/plain' to avoid CORS preflight (OPTIONS) requests
+                    // that Google Apps Script does not handle well. The script on the server
+                    // side will then parse this text body as JSON.
+                    'Content-Type': 'text/plain',
                 },
                 body: JSON.stringify({ action, payload }),
             });
-            // With 'no-cors', we can't inspect the response. We assume success and refetch.
-            // The Apps Script must be deployed to allow anonymous access.
-            await fetchData();
+
+            if (!response.ok) {
+                throw new Error(`Server error (${response.status}). Please check your Google Apps Script and its deployment settings.`);
+            }
+
+            const result = await response.json();
+            if (result.status !== 'success' && result.result !== 'success') {
+                throw new Error(`The script reported an issue: ${result.message || 'Unknown error'}`);
+            }
+
+            await fetchData({ quiet: true });
             return true;
-        } catch (error) {
+        } catch (error: any) {
             console.error(`Failed to perform action ${action}:`, error);
-            showNotification(`Action failed: ${action}. Please try again.`, 'error');
+            const friendlyAction = action.replace(/_/g, ' ').toLowerCase();
+            let errorMessage = `Failed to ${friendlyAction}. An unexpected error occurred.`;
+
+            if (error instanceof TypeError) { // This often indicates a CORS or network issue
+                errorMessage = `Action failed due to a network error (likely CORS). Please double-check the script deployment instructions and ensure you are using the provided Apps Script code from Settings.`;
+            } else if (error instanceof SyntaxError) {
+                errorMessage = `Received an invalid response from the server when trying to ${friendlyAction}.`;
+            } else {
+                errorMessage = error.message;
+            }
+            showNotification(errorMessage, 'error');
             setLoading(false);
             return false;
         }
-    }, [sheetsUrl, fetchData]);
+    }, [sheetsUrl, fetchData, showNotification]);
 
 
     const handleSave = useCallback(async (transaction: Transaction) => {
@@ -111,7 +141,7 @@ const App: React.FC = () => {
             showNotification(isEditing ? 'Data updated successfully!' : 'New entry added successfully!');
             setActiveModal(null);
         }
-    }, [transactions, postToSheet]);
+    }, [transactions, postToSheet, showNotification]);
 
     const handleEdit = useCallback((id: string) => {
         const transactionToEdit = transactions.find(t => t.id === id);
@@ -152,7 +182,7 @@ Status: ${transaction.status}
                 setActiveModal(null);
             }
         }
-    }, [activeModal, postToSheet]);
+    }, [activeModal, postToSheet, showNotification]);
 
     const handleExportData = useCallback(() => {
         if (transactions.length === 0) {
@@ -226,7 +256,7 @@ Status: ${transaction.status}
         if (url) {
             fetchData();
         }
-    }, [setSheetsUrl, fetchData]);
+    }, [setSheetsUrl, fetchData, showNotification]);
 
     const handleSaveNewCustomer = useCallback(async (newCustomer: { name: string, phone: string }) => {
         if (newCustomer.name && !customers.some(c => c.name.toLowerCase() === newCustomer.name.toLowerCase())) {
@@ -306,8 +336,24 @@ Status: ${transaction.status}
                 </Suspense>
 
                 {notification && (
-                    <div className={`fixed top-24 right-4 ${notification.type === 'success' ? 'bg-green-600' : 'bg-highlight-red'} text-white py-2 px-4 rounded-lg shadow-lg animate-fade-in-out z-50`}>
-                        {notification.message}
+                    <div className={`fixed top-24 right-4 max-w-sm w-[calc(100%-2rem)] ${notification.type === 'success' ? 'bg-green-600' : 'bg-highlight-red'} text-white py-3 px-4 rounded-lg shadow-lg animate-fade-in-out z-50 flex items-center justify-between gap-4`}>
+                        <div className="flex items-center gap-3">
+                            {notification.type === 'success' ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            )}
+                            <span className="flex-1">{notification.message}</span>
+                        </div>
+                        <button onClick={() => setNotification(null)} className="p-1 rounded-full hover:bg-black/20 flex-shrink-0" aria-label="Dismiss notification">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
                     </div>
                 )}
                 
@@ -383,7 +429,7 @@ Status: ${transaction.status}
                     100% { opacity: 0; transform: translateY(-20px); }
                 }
                 .animate-fade-in-out {
-                    animation: fade-in-out 3s ease-in-out forwards;
+                    animation: fade-in-out 8s ease-in-out forwards;
                 }
             `}</style>
         </div>

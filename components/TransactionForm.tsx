@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Transaction, TransactionStatus, Customer } from '../types';
+import { Transaction, TransactionStatus, Customer, PURITIES } from '../types';
 import AddNameDialog from './AddNameDialog';
 import AddItemDialog from './AddItemDialog';
 
@@ -148,9 +148,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
             if (prev.status === TransactionStatus.Paid) {
                 return prev;
             }
-
-            // FIX: Explicitly type `newStatus` as `TransactionStatus` to prevent type narrowing
-            // by control flow analysis, which was causing assignment errors below.
+            
             let newStatus: TransactionStatus = prev.status;
 
             // When weight is given but not returned, status is 'Not Returned'.
@@ -398,8 +396,9 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
                         className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border bg-ivory/50 focus:outline-none focus:ring-primary-gold focus:border-primary-gold sm:text-sm rounded-md ${errors.quality ? 'border-highlight-red text-highlight-red' : 'border-primary-gold/50'}`}
                     >
                         <option value="">Select Purity</option>
-                        <option value="916">916</option>
-                        <option value="750">750</option>
+                        {PURITIES.map(purity => (
+                           <option key={purity} value={purity}>{purity}</option>
+                        ))}
                     </select>
                     {errors.quality && <p className="mt-1 text-xs text-highlight-red">{errors.quality}</p>}
                 </div>
