@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Transaction, TransactionStatus, Customer } from '../types';
 import AddNameDialog from './AddNameDialog';
@@ -10,7 +9,8 @@ interface TransactionFormProps {
     existingTransaction: Transaction | null;
     customers: Customer[];
     onSaveNewCustomer: (customer: { name: string, phone: string }) => void;
-    uniqueItems: string[];
+    items: string[];
+    onSaveNewItem: (newItem: string) => void;
 }
 
 const AddCircleIcon = ({ className = "h-5 w-5" }: { className?: string }) => (
@@ -33,7 +33,7 @@ const statusLogicConfig = {
 };
 
 
-const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, existingTransaction, customers, onSaveNewCustomer, uniqueItems }) => {
+const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, existingTransaction, customers, onSaveNewCustomer, items, onSaveNewItem }) => {
     const getInitialState = useCallback(() => {
         if (existingTransaction) return existingTransaction;
         
@@ -56,7 +56,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
     }, [existingTransaction]);
 
     const [transaction, setTransaction] = useState<Transaction>(getInitialState);
-    const [localUniqueItems, setLocalUniqueItems] = useState(uniqueItems);
+    const [localItems, setLocalItems] = useState(items);
     const [isAddNameDialogOpen, setIsAddNameDialogOpen] = useState(false);
     const [isAddItemDialogOpen, setIsAddItemDialogOpen] = useState(false);
     const [selectedPhone, setSelectedPhone] = useState<string | undefined>('');
@@ -111,8 +111,8 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
 
     
     useEffect(() => {
-        setLocalUniqueItems(uniqueItems);
-    }, [uniqueItems]);
+        setLocalItems(items);
+    }, [items]);
 
     useEffect(() => {
         const customer = customers.find(c => c.name === transaction.name);
@@ -288,8 +288,9 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
     };
 
     const handleSaveNewItem = (newItem: string) => {
-        if (newItem && !localUniqueItems.some(i => i.toLowerCase() === newItem.toLowerCase())) {
-            setLocalUniqueItems(prev => [...prev, newItem].sort());
+        onSaveNewItem(newItem);
+        if (newItem && !localItems.some(i => i.toLowerCase() === newItem.toLowerCase())) {
+            setLocalItems(prev => [...prev, newItem].sort());
         }
         setTransaction(prev => ({ ...prev, item: newItem }));
         if (errors.item) {
@@ -365,7 +366,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
                 isOpen={isAddItemDialogOpen}
                 onClose={() => setIsAddItemDialogOpen(false)}
                 onSave={handleSaveNewItem}
-                existingItems={localUniqueItems}
+                existingItems={localItems}
             />
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -386,7 +387,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
                     </div>
                 </div>
 
-                {renderSelectWithAdd('item', 'Item', localUniqueItems, '', 'h-8 w-8')}
+                {renderSelectWithAdd('item', 'Item', localItems, '', 'h-8 w-8')}
                 <div>
                     <label htmlFor="quality" className="block text-sm font-medium text-text-main/90">Purity</label>
                     <select

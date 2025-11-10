@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Transaction, Customer } from '../types';
 import TransactionForm from './TransactionForm';
@@ -10,10 +9,11 @@ interface TransactionModalProps {
     existingTransaction: Transaction | null;
     customers: Customer[];
     onSaveNewCustomer: (customer: { name: string, phone: string }) => void;
-    uniqueItems: string[];
+    items: string[];
+    onSaveNewItem: (item: string) => void;
 }
 
-const TransactionModal: React.FC<TransactionModalProps> = ({ isOpen, onClose, onSave, existingTransaction, customers, onSaveNewCustomer, uniqueItems }) => {
+const TransactionModal: React.FC<TransactionModalProps> = ({ isOpen, onClose, onSave, existingTransaction, customers, onSaveNewCustomer, items, onSaveNewItem }) => {
     if (!isOpen) return null;
 
     return (
@@ -44,7 +44,8 @@ const TransactionModal: React.FC<TransactionModalProps> = ({ isOpen, onClose, on
                         existingTransaction={existingTransaction}
                         customers={customers}
                         onSaveNewCustomer={onSaveNewCustomer}
-                        uniqueItems={uniqueItems}
+                        items={items}
+                        onSaveNewItem={onSaveNewItem}
                     />
                 </div>
             </div>

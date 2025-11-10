@@ -22,3 +22,7 @@ export interface Customer {
     name: string;
     phone?: string;
 }
+
+export interface Item {
+    name: string;
+}

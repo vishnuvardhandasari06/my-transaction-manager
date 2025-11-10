@@ -1,12 +1,12 @@
 
-import React, { useState, useMemo, useCallback, lazy, Suspense } from 'react';
-import { Transaction, Customer } from './types';
+import React, { useState, useMemo, useCallback, lazy, Suspense, useEffect } from 'react';
+import { Transaction, Customer, Item } from './types';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useDebounce } from './hooks/useDebounce';
 import TransactionTable from './components/TransactionTable';
 import SearchBar from './components/SearchBar';
 import { Header } from './components/Header';
-import { PlusIcon, ExportIcon, JournalIcon } from './components/Icons';
+import { PlusIcon, ExportIcon, JournalIcon, SettingsIcon } from './components/Icons';
 import BottomNav from './components/BottomNav';
 
 // Lazy load modal components to reduce initial bundle size.
@@ -28,15 +28,16 @@ type ModalType =
   | { type: 'SETTINGS' };
 
 const App: React.FC = () => {
-    const [transactions, setTransactions] = useLocalStorage<Transaction[]>('transactions', []);
-    const [customers, setCustomers] = useLocalStorage<Customer[]>('customers', []);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [customers, setCustomers] = useState<Customer[]>([]);
+    const [items, setItems] = useState<Item[]>([]);
     const [activeModal, setActiveModal] = useState<ModalType | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [purityFilter, setPurityFilter] = useState('All');
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
     const [sheetsUrl, setSheetsUrl] = useLocalStorage<string>('sheetsUrl', '');
+    const [loading, setLoading] = useState(true);
 
-    // Debounce search term to avoid re-filtering on every keystroke.
     const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
     const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
@@ -45,44 +46,72 @@ const App: React.FC = () => {
             setNotification(null);
         }, 3000);
     };
-    
-    // Memoize sync function as it's used in other callbacks.
-    const syncWithGoogleSheet = useCallback(async (transaction: Transaction, action: 'SAVE' | 'DELETE') => {
+
+    const fetchData = useCallback(async () => {
         if (!sheetsUrl) {
+            setLoading(false);
             return;
         }
+        setLoading(true);
+        try {
+            const response = await fetch(sheetsUrl);
+            if (!response.ok) throw new Error('Network response was not ok. Check script deployment permissions.');
+            const { transactions: fetchedTransactions, customers: fetchedCustomers, items: fetchedItems } = await response.json();
+            
+            // Ensure data is in the correct format before setting state
+            setTransactions(Array.isArray(fetchedTransactions) ? fetchedTransactions : []);
+            setCustomers(Array.isArray(fetchedCustomers) ? fetchedCustomers : []);
+            setItems(Array.isArray(fetchedItems) ? fetchedItems : []);
+            
+            showNotification('Data synced with Google Sheets.', 'success');
+        } catch (error) {
+            console.error('Failed to fetch data from Google Sheets:', error);
+            showNotification('Failed to load data. Check Sheets URL or script setup.', 'error');
+        } finally {
+            setLoading(false);
+        }
+    }, [sheetsUrl]);
+
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
+
+    const postToSheet = useCallback(async (action: string, payload: any): Promise<boolean> => {
+        if (!sheetsUrl) {
+            showNotification('Please set up Google Sheets URL in settings to save data.', 'error');
+            return false;
+        }
+        setLoading(true);
         try {
             await fetch(sheetsUrl, {
                 method: 'POST',
                 mode: 'no-cors',
-                body: JSON.stringify({ action, transaction }),
+                headers: {
+                    'Content-Type': 'text/plain;charset=utf-8',
+                },
+                body: JSON.stringify({ action, payload }),
             });
-            console.log(`Sync request sent: ${action} for ${transaction.id}`);
+            // With 'no-cors', we can't inspect the response. We assume success and refetch.
+            // The Apps Script must be deployed to allow anonymous access.
+            await fetchData();
+            return true;
         } catch (error) {
-            console.error('Failed to sync with Google Sheets:', error);
-            showNotification('Google Sheets sync failed. Check URL or connection.', 'error');
+            console.error(`Failed to perform action ${action}:`, error);
+            showNotification(`Action failed: ${action}. Please try again.`, 'error');
+            setLoading(false);
+            return false;
         }
-    }, [sheetsUrl]);
+    }, [sheetsUrl, fetchData]);
 
 
-    const handleSave = useCallback((transaction: Transaction) => {
-        if (transactions.some(t => t.id !== transaction.id && t.name === transaction.name && t.date === transaction.date)) {
-            alert('A transaction with the same name and date already exists.');
-            return;
-        }
-
+    const handleSave = useCallback(async (transaction: Transaction) => {
         const isEditing = transactions.some(t => t.id === transaction.id);
-
-        if (isEditing) {
-            setTransactions(transactions.map(t => t.id === transaction.id ? transaction : t));
-            showNotification('Data updated successfully!');
-        } else {
-            setTransactions([transaction, ...transactions]);
-            showNotification('New entry added successfully!');
+        const success = await postToSheet('SAVE_TRANSACTION', transaction);
+        if (success) {
+            showNotification(isEditing ? 'Data updated successfully!' : 'New entry added successfully!');
+            setActiveModal(null);
         }
-        syncWithGoogleSheet(transaction, 'SAVE');
-        setActiveModal(null);
-    }, [transactions, syncWithGoogleSheet, setTransactions]);
+    }, [transactions, postToSheet]);
 
     const handleEdit = useCallback((id: string) => {
         const transactionToEdit = transactions.find(t => t.id === id);
@@ -114,18 +143,16 @@ Status: ${transaction.status}
         window.open(whatsappUrl, '_blank');
     }, [transactions]);
 
-    const confirmDelete = useCallback(() => {
+    const confirmDelete = useCallback(async () => {
         if (activeModal?.type === 'CONFIRM_DELETE') {
             const { transactionId } = activeModal;
-            const transactionToDelete = transactions.find(t => t.id === transactionId);
-            setTransactions(transactions.filter(t => t.id !== transactionId));
-            setActiveModal(null);
-            showNotification('Entry deleted successfully!');
-            if (transactionToDelete) {
-                syncWithGoogleSheet(transactionToDelete, 'DELETE');
+            const success = await postToSheet('DELETE_TRANSACTION', { id: transactionId });
+            if (success) {
+                showNotification('Entry deleted successfully!');
+                setActiveModal(null);
             }
         }
-    }, [activeModal, transactions, syncWithGoogleSheet, setTransactions]);
+    }, [activeModal, postToSheet]);
 
     const handleExportData = useCallback(() => {
         if (transactions.length === 0) {
@@ -181,7 +208,7 @@ Status: ${transaction.status}
             const searchTermLower = debouncedSearchTerm.toLowerCase();
             const searchTermMatch = t.name.toLowerCase().includes(searchTermLower) ||
                                    t.item.toLowerCase().includes(searchTermLower) ||
-                                   t.date.includes(debouncedSearchTerm);
+                                   (t.date && t.date.includes(debouncedSearchTerm));
             
             const purityMatch = purityFilter === 'All' || t.quality === purityFilter;
 
@@ -193,21 +220,26 @@ Status: ${transaction.status}
         return filteredTransactions.reduce((acc, transaction) => acc + (transaction.sale || 0), 0);
     }, [filteredTransactions]);
 
-    const uniqueItems = useMemo(() => [...new Set(transactions.map(t => t.item))], [transactions]);
-
     const handleSaveSettings = useCallback((url: string) => {
         setSheetsUrl(url);
-        showNotification(url ? 'Google Sheets sync enabled!' : 'Google Sheets sync disabled.');
-    }, [setSheetsUrl]);
-
-    const handleSaveNewCustomer = useCallback((newCustomer: { name: string, phone: string }) => {
-        if (newCustomer.name && !customers.some(c => c.name.toLowerCase() === newCustomer.name.toLowerCase())) {
-            const sortedCustomers = [...customers, newCustomer].sort((a, b) => a.name.localeCompare(b.name));
-            setCustomers(sortedCustomers);
+        showNotification(url ? 'Google Sheets URL saved!' : 'Google Sheets sync disabled.');
+        if (url) {
+            fetchData();
         }
-    }, [customers, setCustomers]);
+    }, [setSheetsUrl, fetchData]);
 
-    // Use useCallback for all handlers passed as props to memoized components.
+    const handleSaveNewCustomer = useCallback(async (newCustomer: { name: string, phone: string }) => {
+        if (newCustomer.name && !customers.some(c => c.name.toLowerCase() === newCustomer.name.toLowerCase())) {
+            await postToSheet('SAVE_CUSTOMER', newCustomer);
+        }
+    }, [customers, postToSheet]);
+
+    const handleSaveNewItem = useCallback(async (newItemName: string) => {
+        if (newItemName && !items.some(i => i.name.toLowerCase() === newItemName.toLowerCase())) {
+            await postToSheet('SAVE_ITEM', { name: newItemName });
+        }
+    }, [items, postToSheet]);
+
     const handleAddNew = useCallback(() => setActiveModal({ type: 'TRANSACTION_FORM', transaction: null }), []);
     const handleCancelModal = useCallback(() => setActiveModal(null), []);
     const handleOpenSettings = useCallback(() => setActiveModal({ type: 'SETTINGS' }), []);
@@ -216,6 +248,31 @@ Status: ${transaction.status}
         <div className="min-h-screen pb-24 md:pb-0">
             <Header onOpenSettings={handleOpenSettings} />
             <main className="container mx-auto p-4 md:p-6 lg:p-8">
+                 {loading && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]" aria-label="Loading">
+                        <div className="animate-spin rounded-full h-24 w-24 border-t-4 border-b-4 border-primary-gold"></div>
+                    </div>
+                )}
+
+                {!sheetsUrl && !loading && (
+                    <div className="fixed inset-0 bg-ivory bg-opacity-95 flex items-center justify-center z-40 p-4 text-center">
+                        <div className="max-w-lg">
+                            <h2 className="text-3xl font-serif font-bold text-accent-maroon mb-4">Welcome to NL Jewellers</h2>
+                            <p className="text-lg text-text-main/80 mb-6">
+                                To enable multi-user sync and store your data securely, please set up the Google Sheets connection.
+                            </p>
+                            <button
+                                onClick={handleOpenSettings}
+                                className="inline-flex items-center justify-center gap-3 bg-primary-gold text-text-main font-bold py-3 px-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1"
+                            >
+                                <SettingsIcon />
+                                Start Setup
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+
                 <Suspense fallback={<SuspenseFallback />}>
                     {activeModal?.type === 'SETTINGS' && (
                         <SettingsDialog
@@ -242,7 +299,8 @@ Status: ${transaction.status}
                             existingTransaction={activeModal.transaction}
                             customers={customers}
                             onSaveNewCustomer={handleSaveNewCustomer}
-                            uniqueItems={uniqueItems}
+                            items={items.map(i => i.name)}
+                            onSaveNewItem={handleSaveNewItem}
                         />
                     )}
                 </Suspense>
@@ -256,14 +314,16 @@ Status: ${transaction.status}
                 <div className="text-center mb-6 hidden md:flex flex-col sm:flex-row flex-wrap items-center justify-center gap-4">
                     <button
                         onClick={handleAddNew}
-                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-primary-gold text-text-main font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5"
+                        disabled={!sheetsUrl}
+                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-primary-gold text-text-main font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <PlusIcon />
                         Add New Entry
                     </button>
                     <button
                         onClick={handleExportData}
-                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 border border-primary-gold text-primary-gold font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg hover:bg-primary-gold/10 transition-all transform hover:-translate-y-0.5"
+                        disabled={!sheetsUrl}
+                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 border border-primary-gold text-primary-gold font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg hover:bg-primary-gold/10 transition-all transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <ExportIcon />
                         Export Data
@@ -278,7 +338,7 @@ Status: ${transaction.status}
                         purityFilter={purityFilter}
                         onPurityChange={setPurityFilter}
                     />
-                    {transactions.length > 0 ? (
+                    {sheetsUrl && transactions.length > 0 ? (
                       <TransactionTable
                           transactions={filteredTransactions}
                           onEdit={handleEdit}
@@ -289,17 +349,18 @@ Status: ${transaction.status}
                     ) : (
                         <div className="text-center py-16 px-6">
                             <JournalIcon className="mx-auto h-24 w-24 text-primary-gold/30" />
-                            <h3 className="mt-4 text-xl font-semibold text-text-main">Your Journal is Empty</h3>
+                            <h3 className="mt-4 text-xl font-semibold text-text-main">
+                                {sheetsUrl ? 'Your Journal is Empty' : 'Setup Required'}
+                            </h3>
                             <p className="mt-2 text-base text-text-main/70">
-                                Start by adding your first transaction.
+                                {sheetsUrl ? 'Start by adding your first transaction.' : 'Please configure the Google Sheets URL in settings to begin.'}
                             </p>
                             <div className="mt-8 flex justify-center gap-4">
                                 <button
-                                    onClick={handleAddNew}
+                                    onClick={sheetsUrl ? handleAddNew : handleOpenSettings}
                                     className="inline-flex items-center justify-center gap-2 bg-primary-gold text-text-main font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5"
                                 >
-                                    <PlusIcon />
-                                    Add New Entry
+                                    {sheetsUrl ? <><PlusIcon /> Add New Entry</> : <><SettingsIcon /> Open Settings</>}
                                 </button>
                             </div>
                         </div>
@@ -311,6 +372,7 @@ Status: ${transaction.status}
                 <BottomNav 
                     onAddNew={handleAddNew}
                     onExport={handleExportData}
+                    disabled={!sheetsUrl}
                 />
             )}
              <style>{`

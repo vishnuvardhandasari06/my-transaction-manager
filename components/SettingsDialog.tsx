@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 
 interface SettingsDialogProps {
@@ -23,20 +22,20 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave
         onSave(url);
         onClose();
     };
-
+    
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 transition-opacity">
-            <div className="bg-ivory rounded-lg shadow-xl transform transition-all sm:my-8 sm:max-w-2xl sm:w-full mx-4">
-                <div className="px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                    <h3 className="text-xl font-serif text-accent-maroon border-b border-primary-gold/20 pb-4" id="modal-title">
-                        Google Sheets Sync Settings
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 transition-opacity p-4">
+            <div className="bg-ivory rounded-lg shadow-xl transform transition-all sm:my-8 sm:max-w-xl sm:w-full mx-4 max-h-[90vh] flex flex-col">
+                <div className="px-4 pt-5 sm:px-6 pb-4 border-b border-primary-gold/20">
+                    <h3 className="text-xl font-serif text-accent-maroon" id="modal-title">
+                        Google Sheets Sync Setup
                     </h3>
-                    <div className="mt-4 text-sm text-text-main/90 space-y-4">
-                        <p>
-                            Automatically sync your data to a Google Sheet by setting up a Google Apps Script Web App. Follow the instructions provided by the developer.
-                        </p>
-                        <p className="font-semibold">
-                            Once set up, paste the "Web app URL" you receive from Google below.
+                </div>
+
+                <div className="p-4 sm:p-6 overflow-y-auto">
+                    <div className="space-y-4">
+                        <p className="text-sm text-text-main/90">
+                            Enter the Web App URL from your deployed Google Apps Script to enable real-time data synchronization.
                         </p>
                         <div>
                             <label htmlFor="sheets-url" className="block text-sm font-medium text-text-main">Web App URL</label>
@@ -51,13 +50,14 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose, onSave
                         </div>
                     </div>
                 </div>
-                <div className="bg-ivory/50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse rounded-b-lg">
+
+                <div className="bg-ivory/50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse rounded-b-lg mt-auto flex-shrink-0">
                     <button
                         type="button"
                         className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-primary-gold text-base font-medium text-text-main hover:bg-button-hover-gold focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-gold sm:ml-3 sm:w-auto sm:text-sm"
                         onClick={handleSave}
                     >
-                        Save
+                        Save Settings
                     </button>
                     <button
                         type="button"
