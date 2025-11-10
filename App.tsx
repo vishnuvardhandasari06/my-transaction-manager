@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, lazy, Suspense, useEffect } from 'react';
-import { Transaction, Customer, Item } from './types';
+import { Transaction, Customer, Item, TransactionStatus } from './types';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useDebounce } from './hooks/useDebounce';
 import TransactionTable from './components/TransactionTable';
@@ -51,7 +51,9 @@ const App: React.FC = () => {
             setLoading(false);
             return;
         }
-        setLoading(true);
+        if (!options?.quiet) {
+            setLoading(true);
+        }
         try {
             const response = await fetch(sheetsUrl);
             if (!response.ok) throw new Error(`Network response was not ok (${response.status}). Check script deployment permissions.`);
@@ -59,7 +61,8 @@ const App: React.FC = () => {
             const data = await response.json();
             const { transactions: fetchedTransactions, customers: fetchedCustomers, items: fetchedItems } = data;
             
-            setTransactions(Array.isArray(fetchedTransactions) ? fetchedTransactions : []);
+            const activeTransactions = (Array.isArray(fetchedTransactions) ? fetchedTransactions : []).filter(t => t.status !== TransactionStatus.Deleted);
+            setTransactions(activeTransactions);
             setCustomers(Array.isArray(fetchedCustomers) ? fetchedCustomers : []);
             setItems(Array.isArray(fetchedItems) ? fetchedItems : []);
             
@@ -176,13 +179,21 @@ Status: ${transaction.status}
     const confirmDelete = useCallback(async () => {
         if (activeModal?.type === 'CONFIRM_DELETE') {
             const { transactionId } = activeModal;
-            const success = await postToSheet('DELETE_TRANSACTION', { id: transactionId });
+            const transactionToDelete = transactions.find(t => t.id === transactionId);
+            if (!transactionToDelete) {
+                showNotification('Could not find the transaction to delete.', 'error');
+                setActiveModal(null);
+                return;
+            }
+
+            const updatedTransaction = { ...transactionToDelete, status: TransactionStatus.Deleted };
+            const success = await postToSheet('SAVE_TRANSACTION', updatedTransaction);
             if (success) {
-                showNotification('Entry deleted successfully!');
+                showNotification('Entry hidden successfully!');
                 setActiveModal(null);
             }
         }
-    }, [activeModal, postToSheet, showNotification]);
+    }, [activeModal, postToSheet, showNotification, transactions]);
 
     const handleExportData = useCallback(() => {
         if (transactions.length === 0) {
@@ -317,8 +328,8 @@ Status: ${transaction.status}
                             isOpen={true}
                             onClose={handleCancelModal}
                             onConfirm={confirmDelete}
-                            title="Delete Entry"
-                            message="Are you sure you want to delete this entry? This action cannot be undone."
+                            title="Hide Entry"
+                            message="Are you sure you want to hide this entry? It will be removed from view but will remain in your Google Sheet."
                         />
                     )}
                     {activeModal?.type === 'TRANSACTION_FORM' && (

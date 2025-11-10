@@ -4,7 +4,8 @@ export type Purity = typeof PURITIES[number];
 export enum TransactionStatus {
     Paid = 'Paid',
     NotReturned = 'Not Returned',
-    Returned = 'Returned'
+    Returned = 'Returned',
+    Deleted = 'Deleted'
 }
 
 export interface Transaction {

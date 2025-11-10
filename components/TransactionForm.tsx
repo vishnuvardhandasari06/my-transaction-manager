@@ -34,7 +34,9 @@ const statusLogicConfig = {
 
 
 const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, existingTransaction, customers, onSaveNewCustomer, items, onSaveNewItem }) => {
-    const getInitialState = useCallback(() => {
+    // Fix: Explicitly define the return type as 'Transaction' to ensure the object created for a new transaction
+    // conforms to the interface, specifically to correctly type the 'quality' property which was being inferred as a generic 'string'.
+    const getInitialState = useCallback((): Transaction => {
         if (existingTransaction) return existingTransaction;
         
         const now = new Date();
@@ -72,7 +74,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
         const autoSavedDataString = localStorage.getItem(autoSaveKey);
         const baseInitialState = getInitialState();
 
-        let finalState = baseInitialState;
+        let finalState: Transaction = baseInitialState;
 
         if (autoSavedDataString) {
             if (window.confirm('You have unsaved changes from a previous session. Do you want to restore them?')) {
@@ -445,7 +447,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
                         onChange={handleChange}
                         className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border bg-ivory/50 focus:outline-none focus:ring-primary-gold focus:border-primary-gold sm:text-sm rounded-md ${errors.status ? 'border-highlight-red text-highlight-red' : 'border-primary-gold/50'}`}
                     >
-                        {Object.values(TransactionStatus).map(status => (
+                        {Object.values(TransactionStatus).filter(s => s !== TransactionStatus.Deleted).map(status => (
                             <option key={status} value={status}>{status}</option>
                         ))}
                     </select>

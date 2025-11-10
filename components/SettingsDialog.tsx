@@ -86,7 +86,7 @@ function doGet(e) {
   }
 }
 
-// Handles POST requests to save, update, or delete data.
+// Handles POST requests to save or update data.
 function doPost(e) {
   // The frontend sends the request body as a plain text string to avoid CORS preflight.
   // We must parse it into a JSON object here.
@@ -104,10 +104,8 @@ function doPost(e) {
 
     switch (action) {
       case 'SAVE_TRANSACTION':
+        // This function handles creates, updates, and "soft deletes" (changing status to 'Deleted').
         result = saveTransaction(sheet, payload);
-        break;
-      case 'DELETE_TRANSACTION':
-        result = deleteTransaction(sheet, payload);
         break;
       case 'SAVE_CUSTOMER':
         result = saveRecord(sheet, CUSTOMERS_SHEET_NAME, payload);
@@ -153,40 +151,24 @@ function getSheetData(sheet) {
   });
 }
 
-// Saves or updates a transaction based on its ID.
+// Saves or updates a transaction based on its ID. Does not delete rows.
 function saveTransaction(spreadsheet, transaction) {
   const sheet = spreadsheet.getSheetByName(TRANSACTIONS_SHEET_NAME);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const idColumnIndex = headers.indexOf('id') + 1;
   const data = sheet.getDataRange().getValues();
   
+  // Find existing row by ID.
   let rowIndex = data.slice(1).findIndex(row => row[idColumnIndex - 1] == transaction.id) + 2;
   const rowData = headers.map(header => transaction[header] !== undefined ? transaction[header] : '');
   
-  if (rowIndex > 1) { // Row found, update it
+  if (rowIndex > 1) { // Row found, update it.
     sheet.getRange(rowIndex, 1, 1, headers.length).setValues([rowData]);
     return 'Transaction updated: ' + transaction.id;
-  } else { // Not found, append new row
+  } else { // Not found, append new row.
     sheet.appendRow(rowData);
     return 'Transaction added: ' + transaction.id;
   }
-}
-
-// Deletes a transaction by its ID.
-function deleteTransaction(spreadsheet, payload) {
-  const sheet = spreadsheet.getSheetByName(TRANSACTIONS_SHEET_NAME);
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const idColumnIndex = headers.indexOf('id');
-  if (idColumnIndex === -1) throw new Error("'id' column not found.");
-  
-  const data = sheet.getDataRange().getValues();
-  for (let i = data.length - 1; i >= 1; i--) {
-    if (data[i][idColumnIndex] == payload.id) {
-      sheet.deleteRow(i + 1);
-      return 'Deleted transaction ' + payload.id;
-    }
-  }
-  throw new Error('Transaction ID not found: ' + payload.id);
 }
 
 // Generic function to save a new customer or item.
