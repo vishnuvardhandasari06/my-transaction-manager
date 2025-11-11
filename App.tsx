@@ -34,6 +34,8 @@ const App: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [purityFilter, setPurityFilter] = useState('All');
     const [statusFilter, setStatusFilter] = useState('All');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
     const [sheetsUrl, setSheetsUrl] = useLocalStorage<string>('sheetsUrl', '');
     const [loading, setLoading] = useState(true);
@@ -81,14 +83,46 @@ const App: React.FC = () => {
             }
         } catch (error: any) {
             console.error('Failed to fetch data from Google Sheets:', error);
-            let errorMessage = 'Failed to load data. Check the Sheets URL and your internet connection.';
-            if (error instanceof TypeError) { // This often indicates a CORS or network issue
-                errorMessage = 'Network Error: Could not fetch data. This is likely a CORS issue. Please carefully check the Google Apps Script deployment instructions in Settings.';
-            } else if (error instanceof SyntaxError) {
-                errorMessage = 'Failed to parse data from Google Sheets. The script might not be returning valid JSON.';
+            let errorMessage: string;
+    
+            if (error instanceof SyntaxError) {
+                errorMessage = 'Failed to parse response from Google Sheets. The script might not be returning valid JSON. Please check the script code and its deployment.';
+            } else if (error instanceof TypeError) {
+                if (error.message.includes('Invalid URL')) {
+                    errorMessage = 'The Google Sheets URL is invalid. Please check the URL format in Settings.';
+                } else { // Catches "Failed to fetch" which is often network or CORS
+                    errorMessage = 'Network Error: Could not connect. This might be a CORS issue or loss of internet. Please check deployment settings (especially "Who has access") and your connection.';
+                }
             } else if (error.message.includes('Network response was not ok')) {
-                errorMessage = 'Connection to Google Sheets failed. Please verify your Web App URL and check script deployment permissions.';
+                // Extract status code from the error message, e.g., "Network response was not ok (404)..."
+                const match = error.message.match(/\((\d{3})\)/);
+                if (match) {
+                    const status = parseInt(match[1], 10);
+                    switch (status) {
+                        case 401:
+                        case 403:
+                            errorMessage = `Permission Error (${status}): Access denied. Ensure script is deployed with "Execute as: Me" and "Who has access: Anyone". You may need to re-deploy.`;
+                            break;
+                        case 404:
+                            errorMessage = `Not Found (${status}): The Web App URL is incorrect. Please double-check it in Settings.`;
+                            break;
+                        case 302: // Google often redirects to a login page if auth is wrong
+                            errorMessage = `Redirect Error (302): This may mean you need to re-authorize the script or redeploy with correct permissions.`;
+                            break;
+                        default:
+                            if (status >= 500) {
+                                errorMessage = `Server Error (${status}): The Google Apps Script failed. Check the script for errors in your Google account's script editor.`;
+                            } else {
+                                errorMessage = `Connection failed with status ${status}. Please verify your URL and deployment settings.`;
+                            }
+                    }
+                } else {
+                    errorMessage = 'Connection to Google Sheets failed. Please verify your Web App URL and deployment permissions.';
+                }
+            } else {
+                errorMessage = `An unexpected error occurred: ${error.message}`;
             }
+            
             showNotification(errorMessage, 'error');
         } finally {
             setLoading(false);
@@ -169,7 +203,18 @@ const App: React.FC = () => {
 
     const handleShareViaWhatsApp = useCallback((id: string) => {
         const transaction = transactions.find(t => t.id === id);
-        if (!transaction) return;
+        if (!transaction) {
+            showNotification('Transaction not found.', 'error');
+            return;
+        }
+    
+        const customer = customers.find(c => c.name === transaction.name);
+        if (!customer || !customer.phone) {
+            showNotification(`Phone number for ${transaction.name} is not available. Please add it to the customer's details.`, 'error');
+            return;
+        }
+        
+        const customerPhoneNumber = String(customer.phone).replace(/[^0-9]/g, '');
 
         const formatDate = (dateString: string) => {
             if (!dateString) return '-';
@@ -183,22 +228,23 @@ const App: React.FC = () => {
                     hour12: true,
                 });
             } catch {
-                return dateString; // fallback to original string if formatting fails
+                return dateString;
             }
         };
 
-        const message = `NL Jewellers - Transaction Summary
-Customer: ${transaction.name}
+        const message = `Hello ${transaction.name}, here is your transaction summary from NL Jewellers:
+Transaction ID: ${transaction.id}
 Item: ${transaction.item} (${transaction.quality})
 Given: ${transaction.weightGiven !== null ? transaction.weightGiven.toFixed(3) : '-'} gm on ${formatDate(transaction.date)}
 Returned: ${transaction.weightReturn !== null ? transaction.weightReturn.toFixed(3) : '-'} gm on ${formatDate(transaction.returnTime)}
-Sale : ${transaction.sale !== null ? `${transaction.sale.toFixed(3)} gm` : '-'}
+Sale: ${transaction.sale !== null ? `${transaction.sale.toFixed(3)} gm` : '-'}
 Status: ${transaction.status}
 `;
-
-        const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
-        window.open(whatsappUrl, '_blank');
-    }, [transactions]);
+        
+        const encodedMessage = encodeURIComponent(message);
+        const whatsappUrl = `https://api.whatsapp.com/send?phone=${customerPhoneNumber}&text=${encodedMessage}`;
+        window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+    }, [transactions, customers, showNotification]);
 
     const confirmDelete = useCallback(async () => {
         if (activeModal?.type === 'CONFIRM_DELETE') {
@@ -219,9 +265,51 @@ Status: ${transaction.status}
         }
     }, [activeModal, postToSheet, showNotification, transactions]);
 
+    const isFiltering = useMemo(() => {
+        return debouncedSearchTerm.trim() !== '' || purityFilter !== 'All' || statusFilter !== 'All' || startDate !== '' || endDate !== '';
+    }, [debouncedSearchTerm, purityFilter, statusFilter, startDate, endDate]);
+
+    const filteredTransactions = useMemo(() => {
+        let filtered = transactions;
+
+        if (isFiltering) {
+            // When any filter is active, search through all transactions
+            filtered = transactions.filter(t => {
+                const searchTermLower = debouncedSearchTerm.toLowerCase();
+                const searchTermMatch = t.name.toLowerCase().includes(searchTermLower) ||
+                                       t.item.toLowerCase().includes(searchTermLower);
+                
+                const purityMatch = purityFilter === 'All' || t.quality === purityFilter;
+                const statusMatch = statusFilter === 'All' || t.status === statusFilter;
+
+                const dateMatch = (() => {
+                    if (!startDate && !endDate) return true;
+                    if (!t.date) return false;
+                    const transactionDatePart = t.date.split('T')[0];
+                    if (startDate && transactionDatePart < startDate) return false;
+                    if (endDate && transactionDatePart > endDate) return false;
+                    return true;
+                })();
+
+                return searchTermMatch && purityMatch && statusMatch && dateMatch;
+            });
+        } else {
+            // By default, show only entries from the current day
+            const today = new Date().toISOString().split('T')[0];
+            filtered = transactions.filter(t => {
+                if (!t.date) return false;
+                const transactionDate = t.date.split('T')[0];
+                return transactionDate === today;
+            });
+        }
+
+        // Sort the final results chronologically
+        return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }, [transactions, debouncedSearchTerm, purityFilter, statusFilter, startDate, endDate, isFiltering]);
+
     const handleExportData = useCallback(() => {
-        if (transactions.length === 0) {
-            alert('No data to export.');
+        if (filteredTransactions.length === 0) {
+            alert(isFiltering ? 'No visible entries to export.' : 'No data to export.');
             return;
         }
     
@@ -239,7 +327,7 @@ Status: ${transaction.status}
             return strCell;
         };
     
-        const csvRows = transactions.map(t => [
+        const csvRows = filteredTransactions.map(t => [
             escapeCsvCell(t.id),
             escapeCsvCell(t.date),
             escapeCsvCell(t.returnTime),
@@ -266,47 +354,33 @@ Status: ${transaction.status}
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
-    }, [transactions]);
-    
-    const isFiltering = useMemo(() => {
-        return debouncedSearchTerm.trim() !== '' || purityFilter !== 'All' || statusFilter !== 'All';
-    }, [debouncedSearchTerm, purityFilter, statusFilter]);
-
-    const filteredTransactions = useMemo(() => {
-        let filtered = transactions;
-
-        if (isFiltering) {
-            // When any filter is active, search through all transactions
-            filtered = transactions.filter(t => {
-                const searchTermLower = debouncedSearchTerm.toLowerCase();
-                const searchTermMatch = t.name.toLowerCase().includes(searchTermLower) ||
-                                       t.item.toLowerCase().includes(searchTermLower) ||
-                                       (t.date && t.date.includes(debouncedSearchTerm));
-                
-                const purityMatch = purityFilter === 'All' || t.quality === purityFilter;
-                const statusMatch = statusFilter === 'All' || t.status === statusFilter;
-
-                return searchTermMatch && purityMatch && statusMatch;
-            });
-        } else {
-            // By default, show only entries from the current day
-            const today = new Date().toISOString().split('T')[0];
-            filtered = transactions.filter(t => {
-                if (!t.date) return false;
-                const transactionDate = t.date.split('T')[0];
-                return transactionDate === today;
-            });
-        }
-
-        // Sort the final results chronologically
-        return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    }, [transactions, debouncedSearchTerm, purityFilter, statusFilter, isFiltering]);
+    }, [filteredTransactions, isFiltering]);
     
     const totalSale = useMemo(() => {
         return filteredTransactions.reduce((acc, transaction) => acc + (transaction.sale || 0), 0);
     }, [filteredTransactions]);
     
-    const listTitle = isFiltering ? 'Filtered Results' : "Today's Entries";
+    const listTitle = useMemo(() => {
+        if (!isFiltering) return "Today's Entries";
+        
+        if (startDate || endDate) {
+            const formatDate = (dateStr: string) => {
+                if (!dateStr) return '';
+                // The date from input is 'YYYY-MM-DD'. We need to parse it correctly.
+                const [year, month, day] = dateStr.split('-');
+                return `${day}/${month}/${year}`;
+            };
+
+            if (startDate && endDate) {
+                if (startDate === endDate) return `Entries for ${formatDate(startDate)}`;
+                return `Entries from ${formatDate(startDate)} to ${formatDate(endDate)}`;
+            }
+            if (startDate) return `Entries from ${formatDate(startDate)}`;
+            if (endDate) return `Entries until ${formatDate(endDate)}`;
+        }
+        
+        return 'Filtered Results';
+    }, [isFiltering, startDate, endDate]);
 
     const handleSaveSettings = useCallback((url: string) => {
         setSheetsUrl(url);
@@ -443,6 +517,10 @@ Status: ${transaction.status}
                         onPurityChange={setPurityFilter}
                         statusFilter={statusFilter}
                         onStatusChange={setStatusFilter}
+                        startDate={startDate}
+                        onStartDateChange={setStartDate}
+                        endDate={endDate}
+                        onEndDateChange={setEndDate}
                     />
                     {sheetsUrl && transactions.length > 0 ? (
                       <TransactionTable

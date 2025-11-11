@@ -116,7 +116,7 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, onEdi
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                <div className="flex items-center gap-4">
-                                    <button onClick={() => onShare(t.id)} className="text-green-600 hover:text-green-800" aria-label="Share on WhatsApp"><WhatsAppIcon /></button>
+                                    <button onClick={() => onShare(t.id)} className="text-green-600 hover:text-green-800" aria-label="Chat on WhatsApp"><WhatsAppIcon /></button>
                                     <button onClick={() => onEdit(t.id)} className="text-primary-gold hover:text-button-hover-gold" aria-label="Edit"><EditIcon /></button>
                                     <button onClick={() => onDelete(t.id)} className="text-highlight-red hover:opacity-70" aria-label="Delete"><DeleteIcon /></button>
                                </div>
@@ -176,7 +176,7 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, onEdi
                                 </div>
                             )}
                             <div className="mt-4 pt-4 border-t border-primary-gold/20 flex justify-end gap-4">
-                                <button onClick={() => onShare(t.id)} className="text-green-600 font-semibold flex items-center gap-1" aria-label="Share"><WhatsAppIcon /> Share</button>
+                                <button onClick={() => onShare(t.id)} className="text-green-600 font-semibold flex items-center gap-1" aria-label="Chat on WhatsApp"><WhatsAppIcon /> Chat</button>
                                 <button onClick={() => onEdit(t.id)} className="text-primary-gold font-semibold flex items-center gap-1" aria-label="Edit"><EditIcon /> Edit</button>
                                 <button onClick={() => onDelete(t.id)} className="text-highlight-red font-semibold flex items-center gap-1" aria-label="Delete"><DeleteIcon /> Delete</button>
                             </div>

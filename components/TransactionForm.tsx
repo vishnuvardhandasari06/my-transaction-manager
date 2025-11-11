@@ -32,6 +32,15 @@ const statusLogicConfig = {
     onReturned: TransactionStatus.Returned,
 };
 
+/**
+ * Generates a short, numeric, unique ID for new transactions.
+ * It uses the last 8 digits of the current timestamp in milliseconds,
+ * which provides uniqueness for a cycle of over 27 hours and is sufficient for this application's scope.
+ */
+const generateShortId = () => {
+    return Date.now().toString().slice(-8);
+};
+
 
 const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, existingTransaction, customers, onSaveNewCustomer, items, onSaveNewItem }) => {
     // Fix: Explicitly define the return type as 'Transaction' to ensure the object created for a new transaction
@@ -44,7 +53,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
         const localDateTime = now.toISOString().slice(0, 16);
 
         return {
-            id: Date.now().toString(),
+            id: generateShortId(),
             date: localDateTime,
             name: '',
             item: '',
@@ -62,7 +71,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
     const [isAddNameDialogOpen, setIsAddNameDialogOpen] = useState(false);
     const [isAddItemDialogOpen, setIsAddItemDialogOpen] = useState(false);
     const [selectedPhone, setSelectedPhone] = useState<string | undefined>('');
-    const [isSaleManuallyEdited, setIsSaleManuallyEdited] = useState(false);
+    const [lastEditedNumericField, setLastEditedNumericField] = useState<'weights' | 'sale' | null>(null);
     const [errors, setErrors] = useState<Partial<Record<keyof Transaction, string>>>({});
     const initialStateRef = useRef<Transaction | null>(null);
 
@@ -87,7 +96,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
         setTransaction(finalState);
         initialStateRef.current = finalState;
 
-        setIsSaleManuallyEdited(false);
+        setLastEditedNumericField(null);
         setErrors({});
         const customer = customers.find(c => c.name === finalState.name);
         setSelectedPhone(customer?.phone);
@@ -121,8 +130,9 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
         setSelectedPhone(customer?.phone);
     }, [transaction.name, customers]);
 
+    // Effect to auto-calculate Sale from weights.
     useEffect(() => {
-        if (isSaleManuallyEdited) return;
+        if (lastEditedNumericField === 'sale') return;
 
         const given = transaction.weightGiven;
         const returned = transaction.weightReturn;
@@ -137,8 +147,32 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
             newSale = 0;
         }
 
-        setTransaction(prev => ({ ...prev, sale: newSale }));
-    }, [transaction.weightGiven, transaction.weightReturn, isSaleManuallyEdited]);
+        if (newSale !== transaction.sale) {
+            setTransaction(prev => ({ ...prev, sale: newSale }));
+        }
+    }, [transaction.weightGiven, transaction.weightReturn, lastEditedNumericField, transaction.sale]);
+
+    // Effect to auto-calculate Weight Return from Sale.
+    useEffect(() => {
+        if (lastEditedNumericField !== 'sale') return;
+
+        const given = transaction.weightGiven;
+        const sale = transaction.sale;
+
+        if (given !== null && sale !== null) {
+            // Ensure given is not less than sale to avoid negative return weight
+            if (given < sale) {
+                return;
+            }
+
+            let newReturn = given - sale;
+            newReturn = parseFloat(newReturn.toFixed(3));
+            
+            if (newReturn !== transaction.weightReturn) {
+                setTransaction(prev => ({ ...prev, weightReturn: newReturn }));
+            }
+        }
+    }, [transaction.sale, transaction.weightGiven, lastEditedNumericField, transaction.weightReturn]);
 
     // Effect to automatically update the transaction status based on weight inputs.
     useEffect(() => {
@@ -210,10 +244,14 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
         }
 
         if (name === 'sale') {
-            setIsSaleManuallyEdited(true);
+            setLastEditedNumericField('sale');
             const numValue = parseFloat(value);
             setTransaction(prev => ({ ...prev, sale: isNaN(numValue) ? null : numValue }));
             return;
+        }
+        
+        if (name === 'weightGiven' || name === 'weightReturn') {
+            setLastEditedNumericField('weights');
         }
     
         if (name === 'weightGiven') {
@@ -248,7 +286,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
     };
     
     const handleRecalculateSale = () => {
-        setIsSaleManuallyEdited(false);
+        setLastEditedNumericField('weights');
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -424,7 +462,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
                             placeholder="Auto-calculated"
                             className={`block w-full px-3 py-2 bg-ivory/50 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary-gold focus:border-primary-gold sm:text-sm pr-10 ${errors.sale ? 'border-highlight-red text-highlight-red' : 'border-primary-gold/50'}`}
                         />
-                        {isSaleManuallyEdited && (
+                        {lastEditedNumericField === 'sale' && (
                             <button
                                 type="button"
                                 onClick={handleRecalculateSale}
