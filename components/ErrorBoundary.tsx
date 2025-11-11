@@ -9,10 +9,9 @@ interface State {
 }
 
 class ErrorBoundary extends Component<Props, State> {
-  // Fix: The error "Property 'props' does not exist on type 'ErrorBoundary'" is typically caused by
-  // the component's `props` not being correctly initialized in TypeScript's view. Adding an explicit
-  // constructor that calls `super(props)` and initializes state is the standard way to fix this,
-  // ensuring the component instance is properly set up.
+  // Fix: Added a constructor to properly initialize the component's state and ensure
+  // that `this.props` is correctly recognized by TypeScript. The previous implementation
+  // using a class property for state was causing a type error.
   constructor(props: Props) {
     super(props);
     this.state = {

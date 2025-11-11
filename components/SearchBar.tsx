@@ -1,16 +1,18 @@
 import React from 'react';
-import { PURITIES } from '../types';
+import { PURITIES, TransactionStatus } from '../types';
 
 interface SearchBarProps {
     searchTerm: string;
     onSearch: (term: string) => void;
     purityFilter: string;
     onPurityChange: (purity: string) => void;
+    statusFilter: string;
+    onStatusChange: (status: string) => void;
 }
 
-const SearchBar: React.FC<SearchBarProps> = ({ searchTerm, onSearch, purityFilter, onPurityChange }) => {
+const SearchBar: React.FC<SearchBarProps> = ({ searchTerm, onSearch, purityFilter, onPurityChange, statusFilter, onStatusChange }) => {
     return (
-        <div className="mb-4 flex flex-col sm:flex-row gap-4">
+        <div className="mb-4 flex flex-col sm:flex-row flex-wrap gap-4">
             <input
                 type="text"
                 placeholder="Search by name, item, or time..."
@@ -28,6 +30,22 @@ const SearchBar: React.FC<SearchBarProps> = ({ searchTerm, onSearch, purityFilte
                     <option value="All">All Purities</option>
                     {PURITIES.map(purity => (
                         <option key={purity} value={purity}>{purity}</option>
+                    ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-text-main/70">
+                    <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                </div>
+            </div>
+            <div className="relative">
+                <select
+                    value={statusFilter}
+                    onChange={(e) => onStatusChange(e.target.value)}
+                    className="w-full sm:w-auto appearance-none px-4 py-2 border border-primary-gold/50 rounded-lg focus:ring-primary-gold focus:border-primary-gold bg-ivory/50 pr-8"
+                    aria-label="Filter by status"
+                >
+                    <option value="All">All Statuses</option>
+                    {Object.values(TransactionStatus).filter(s => s !== TransactionStatus.Deleted).map(status => (
+                        <option key={status} value={status}>{status}</option>
                     ))}
                 </select>
                 <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-text-main/70">

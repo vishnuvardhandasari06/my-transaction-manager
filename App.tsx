@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, lazy, Suspense, useEffect } from 'react';
-import { Transaction, Customer, Item, TransactionStatus } from './types';
+import { Transaction, Customer, Item, TransactionStatus, Purity } from './types';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useDebounce } from './hooks/useDebounce';
 import TransactionTable from './components/TransactionTable';
@@ -33,6 +33,7 @@ const App: React.FC = () => {
     const [activeModal, setActiveModal] = useState<ModalType | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [purityFilter, setPurityFilter] = useState('All');
+    const [statusFilter, setStatusFilter] = useState('All');
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
     const [sheetsUrl, setSheetsUrl] = useLocalStorage<string>('sheetsUrl', '');
     const [loading, setLoading] = useState(true);
@@ -61,7 +62,16 @@ const App: React.FC = () => {
             const data = await response.json();
             const { transactions: fetchedTransactions, customers: fetchedCustomers, items: fetchedItems } = data;
             
-            const activeTransactions = (Array.isArray(fetchedTransactions) ? fetchedTransactions : []).filter(t => t.status !== TransactionStatus.Deleted);
+            const activeTransactions = (Array.isArray(fetchedTransactions) ? fetchedTransactions : [])
+                .filter(t => t.status !== TransactionStatus.Deleted)
+                .map((t): Transaction => ({
+                    ...t,
+                    // Ensure 'quality' is consistently a string. Google Sheets may return it as a number
+                    // if the cell content is purely numeric (e.g., 916), which causes errors with
+                    // string methods like .trim() and breaks strict equality checks (e.g., 916 !== '916').
+                    quality: (t.quality != null ? String(t.quality) : '') as Purity | '',
+                }));
+
             setTransactions(activeTransactions);
             setCustomers(Array.isArray(fetchedCustomers) ? fetchedCustomers : []);
             setItems(Array.isArray(fetchedItems) ? fetchedItems : []);
@@ -161,7 +171,21 @@ const App: React.FC = () => {
         const transaction = transactions.find(t => t.id === id);
         if (!transaction) return;
 
-        const formatDate = (dateString: string) => dateString ? new Date(dateString).toLocaleString() : '-';
+        const formatDate = (dateString: string) => {
+            if (!dateString) return '-';
+            try {
+                return new Date(dateString).toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: true,
+                });
+            } catch {
+                return dateString; // fallback to original string if formatting fails
+            }
+        };
 
         const message = `NL Jewellers - Transaction Summary
 Customer: ${transaction.name}
@@ -243,23 +267,46 @@ Status: ${transaction.status}
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
     }, [transactions]);
+    
+    const isFiltering = useMemo(() => {
+        return debouncedSearchTerm.trim() !== '' || purityFilter !== 'All' || statusFilter !== 'All';
+    }, [debouncedSearchTerm, purityFilter, statusFilter]);
 
     const filteredTransactions = useMemo(() => {
-        return transactions.filter(t => {
-            const searchTermLower = debouncedSearchTerm.toLowerCase();
-            const searchTermMatch = t.name.toLowerCase().includes(searchTermLower) ||
-                                   t.item.toLowerCase().includes(searchTermLower) ||
-                                   (t.date && t.date.includes(debouncedSearchTerm));
-            
-            const purityMatch = purityFilter === 'All' || t.quality === purityFilter;
+        let filtered = transactions;
 
-            return searchTermMatch && purityMatch;
-        }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    }, [transactions, debouncedSearchTerm, purityFilter]);
+        if (isFiltering) {
+            // When any filter is active, search through all transactions
+            filtered = transactions.filter(t => {
+                const searchTermLower = debouncedSearchTerm.toLowerCase();
+                const searchTermMatch = t.name.toLowerCase().includes(searchTermLower) ||
+                                       t.item.toLowerCase().includes(searchTermLower) ||
+                                       (t.date && t.date.includes(debouncedSearchTerm));
+                
+                const purityMatch = purityFilter === 'All' || t.quality === purityFilter;
+                const statusMatch = statusFilter === 'All' || t.status === statusFilter;
+
+                return searchTermMatch && purityMatch && statusMatch;
+            });
+        } else {
+            // By default, show only entries from the current day
+            const today = new Date().toISOString().split('T')[0];
+            filtered = transactions.filter(t => {
+                if (!t.date) return false;
+                const transactionDate = t.date.split('T')[0];
+                return transactionDate === today;
+            });
+        }
+
+        // Sort the final results chronologically
+        return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }, [transactions, debouncedSearchTerm, purityFilter, statusFilter, isFiltering]);
     
     const totalSale = useMemo(() => {
         return filteredTransactions.reduce((acc, transaction) => acc + (transaction.sale || 0), 0);
     }, [filteredTransactions]);
+    
+    const listTitle = isFiltering ? 'Filtered Results' : "Today's Entries";
 
     const handleSaveSettings = useCallback((url: string) => {
         setSheetsUrl(url);
@@ -388,12 +435,14 @@ Status: ${transaction.status}
                 </div>
                
                 <div className="bg-ivory/80 shadow-2xl rounded-xl p-4 md:p-6 mt-8 backdrop-blur-sm border border-primary-gold/10">
-                    <h2 className="text-2xl font-serif font-bold mb-4 text-accent-maroon">Latest Entries</h2>
+                    <h2 className="text-2xl font-serif font-bold mb-4 text-accent-maroon">{listTitle}</h2>
                     <SearchBar
                         searchTerm={searchTerm}
                         onSearch={setSearchTerm}
                         purityFilter={purityFilter}
                         onPurityChange={setPurityFilter}
+                        statusFilter={statusFilter}
+                        onStatusChange={setStatusFilter}
                     />
                     {sheetsUrl && transactions.length > 0 ? (
                       <TransactionTable
@@ -402,6 +451,7 @@ Status: ${transaction.status}
                           onDelete={handleDelete}
                           onShare={handleShareViaWhatsApp}
                           totalSale={totalSale}
+                          isFiltering={isFiltering}
                       />
                     ) : (
                         <div className="text-center py-16 px-6">

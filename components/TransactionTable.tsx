@@ -9,6 +9,7 @@ interface TransactionTableProps {
     onDelete: (id:string) => void;
     onShare: (id: string) => void;
     totalSale: number;
+    isFiltering: boolean;
 }
 
 const formatDuration = (start: string, end: string): string | null => {
@@ -39,6 +40,25 @@ const formatDuration = (start: string, end: string): string | null => {
     return parts.join(' ');
 };
 
+const formatDateTime12Hour = (dateString: string): string => {
+    if (!dateString) return '-';
+    try {
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) return dateString; // Invalid date, return original
+        return date.toLocaleString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+        });
+    } catch (error) {
+        console.error("Could not format date:", dateString, error);
+        return dateString; // fallback
+    }
+};
+
 // Memoize the PurityBadge sub-component as it's a pure presentational component.
 const PurityBadge: React.FC<{ quality: string, size?: 'sm' | 'md' }> = React.memo(({ quality, size = 'md' }) => {
     const padding = size === 'sm' ? 'px-2 py-0.5' : 'px-3 py-1';
@@ -51,10 +71,11 @@ const PurityBadge: React.FC<{ quality: string, size?: 'sm' | 'md' }> = React.mem
     return <>{quality}</>;
 });
 
-const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, onEdit, onDelete, onShare, totalSale }) => {
+const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, onEdit, onDelete, onShare, totalSale, isFiltering }) => {
     
     if (transactions.length === 0) {
-        return <p className="text-center text-text-main/70 py-8">No matching entries found.</p>;
+        const message = isFiltering ? "No matching entries found." : "No entries for today.";
+        return <p className="text-center text-text-main/70 py-8">{message}</p>;
     }
 
     const getStatusColor = (status: string) => {
@@ -80,7 +101,7 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, onEdi
                 <tbody className="bg-white/50 divide-y divide-primary-gold/20">
                     {transactions.map((t) => (
                         <tr key={t.id} className="hover:bg-primary-gold/10">
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-text-main/80">{new Date(t.date).toLocaleString()}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-text-main/80">{formatDateTime12Hour(t.date)}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-text-main">{t.name}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-text-main/80">{t.item}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm"><PurityBadge quality={t.quality} /></td>
@@ -128,7 +149,7 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, onEdi
                                       <p className="text-sm text-text-main/70">{t.item}</p>
                                       <PurityBadge quality={t.quality} size="sm" />
                                     </div>
-                                    <p className="text-xs text-text-main/60 mt-1">{new Date(t.date).toLocaleString()}</p>
+                                    <p className="text-xs text-text-main/60 mt-1">{formatDateTime12Hour(t.date)}</p>
                                 </div>
                                  <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(t.status)}`}>
                                     {t.status}

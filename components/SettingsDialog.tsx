@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 
 interface SettingsDialogProps {
@@ -154,13 +155,19 @@ function getSheetData(sheet) {
 // Saves or updates a transaction based on its ID. Does not delete rows.
 function saveTransaction(spreadsheet, transaction) {
   const sheet = spreadsheet.getSheetByName(TRANSACTIONS_SHEET_NAME);
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  // FIX: Trim headers to match getSheetData and prevent mismatches from whitespace.
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => h.trim());
   const idColumnIndex = headers.indexOf('id') + 1;
   const data = sheet.getDataRange().getValues();
   
-  // Find existing row by ID.
-  let rowIndex = data.slice(1).findIndex(row => row[idColumnIndex - 1] == transaction.id) + 2;
-  const rowData = headers.map(header => transaction[header] !== undefined ? transaction[header] : '');
+  // Find existing row by ID. Using String() for robust comparison.
+  let rowIndex = data.slice(1).findIndex(row => String(row[idColumnIndex - 1]) == String(transaction.id)) + 2;
+  
+  // Ensure null values from the app are written as empty cells in the sheet for consistency.
+  const rowData = headers.map(header => {
+      const value = transaction[header];
+      return value !== undefined && value !== null ? value : '';
+  });
   
   if (rowIndex > 1) { // Row found, update it.
     sheet.getRange(rowIndex, 1, 1, headers.length).setValues([rowData]);
@@ -174,7 +181,8 @@ function saveTransaction(spreadsheet, transaction) {
 // Generic function to save a new customer or item.
 function saveRecord(spreadsheet, sheetName, payload) {
   const sheet = spreadsheet.getSheetByName(sheetName);
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  // FIX: Trim headers to ensure consistency.
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => h.trim());
   const rowData = headers.map(header => payload[header] !== undefined ? payload[header] : '');
   sheet.appendRow(rowData);
   return 'Added new record to ' + sheetName;
