@@ -9,23 +9,24 @@ interface State {
 }
 
 class ErrorBoundary extends Component<Props, State> {
-  // Fix: Replaced the constructor with a public class field to initialize state.
-  // This is a more modern approach that directly addresses the TypeScript errors
-  // indicating that 'state' and 'props' were not recognized on the component instance.
-  public state: State = {
-    hasError: false,
-  };
+  // Fix: Replaced the class property initializer for state with a standard constructor.
+  // This ensures `this.props` is correctly initialized via `super(props)` and resolves the error,
+  // providing better compatibility with various build toolchains.
+  constructor(props: Props) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
-  public static getDerivedStateFromError(_: Error): State {
+  static getDerivedStateFromError(_: Error): State {
     // Update state so the next render will show the fallback UI.
     return { hasError: true };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("Uncaught error:", error, errorInfo);
   }
 
-  public render() {
+  render() {
     if (this.state.hasError) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-ivory p-4 text-center">

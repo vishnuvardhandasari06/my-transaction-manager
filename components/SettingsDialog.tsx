@@ -108,6 +108,9 @@ function doPost(e) {
         // This function handles creates, updates, and "soft deletes" (changing status to 'Deleted').
         result = saveTransaction(sheet, payload);
         break;
+      case 'BULK_SAVE_TRANSACTIONS':
+        result = payload.map(tx => saveTransaction(sheet, tx));
+        break;
       case 'SAVE_CUSTOMER':
         result = saveRecord(sheet, CUSTOMERS_SHEET_NAME, payload);
         break;
@@ -139,13 +142,19 @@ function getSheetData(sheet) {
   if (values.length < 2) return [];
   
   const headers = values[0].map(h => h.trim());
+  const scriptTimeZone = Session.getScriptTimeZone();
+
   return values.slice(1).map(row => {
     let obj = {};
     headers.forEach((header, i) => {
-      if (header.toLowerCase().includes('weight') || header.toLowerCase().includes('sale')) {
-        obj[header] = row[i] === '' ? null : Number(row[i]);
+      const cellValue = row[i];
+      if ((header === 'date' || header === 'returnTime') && cellValue instanceof Date && !isNaN(cellValue.getTime())) {
+        // Format dates to a consistent string format that the client can parse.
+        obj[header] = Utilities.formatDate(cellValue, scriptTimeZone, 'yyyy-MM-dd HH:mm');
+      } else if (header.toLowerCase().includes('weight') || header.toLowerCase().includes('sale')) {
+        obj[header] = cellValue === '' ? null : Number(cellValue);
       } else {
-        obj[header] = row[i];
+        obj[header] = cellValue;
       }
     });
     return obj;
@@ -155,28 +164,48 @@ function getSheetData(sheet) {
 // Saves or updates a transaction based on its ID. Does not delete rows.
 function saveTransaction(spreadsheet, transaction) {
   const sheet = spreadsheet.getSheetByName(TRANSACTIONS_SHEET_NAME);
-  // FIX: Trim headers to match getSheetData and prevent mismatches from whitespace.
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => h.trim());
   const idColumnIndex = headers.indexOf('id') + 1;
+  const dateColumnIndex = headers.indexOf('date') + 1;
+  const returnTimeColumnIndex = headers.indexOf('returnTime') + 1;
+  
   const data = sheet.getDataRange().getValues();
   
   // Find existing row by ID. Using String() for robust comparison.
   let rowIndex = data.slice(1).findIndex(row => String(row[idColumnIndex - 1]) == String(transaction.id)) + 2;
-  
+  const isUpdate = rowIndex > 1;
+
   // Ensure null values from the app are written as empty cells in the sheet for consistency.
   const rowData = headers.map(header => {
-      const value = transaction[header];
+      let value = transaction[header];
+      // Convert date strings into true Date objects so Sheets can format them correctly.
+      if ((header === 'date' || header === 'returnTime') && typeof value === 'string' && value) {
+        return new Date(value);
+      }
       return value !== undefined && value !== null ? value : '';
   });
   
-  if (rowIndex > 1) { // Row found, update it.
-    sheet.getRange(rowIndex, 1, 1, headers.length).setValues([rowData]);
-    return 'Transaction updated: ' + transaction.id;
+  let targetRange;
+  if (isUpdate) { // Row found, update it.
+    targetRange = sheet.getRange(rowIndex, 1, 1, headers.length);
+    targetRange.setValues([rowData]);
   } else { // Not found, append new row.
     sheet.appendRow(rowData);
-    return 'Transaction added: ' + transaction.id;
+    rowIndex = sheet.getLastRow();
+    targetRange = sheet.getRange(rowIndex, 1, 1, headers.length);
   }
+
+  // Set the desired date format for the date and returnTime cells for better readability in Sheets.
+  if (dateColumnIndex > 0) {
+    targetRange.getCell(1, dateColumnIndex).setNumberFormat("yyyy-MM-dd HH:mm");
+  }
+  if (returnTimeColumnIndex > 0) {
+    targetRange.getCell(1, returnTimeColumnIndex).setNumberFormat("yyyy-MM-dd HH:mm");
+  }
+  
+  return isUpdate ? 'Transaction updated: ' + transaction.id : 'Transaction added: ' + transaction.id;
 }
+
 
 // Generic function to save a new customer or item.
 function saveRecord(spreadsheet, sheetName, payload) {

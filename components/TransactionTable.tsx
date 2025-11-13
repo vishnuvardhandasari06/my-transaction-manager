@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Transaction, TransactionStatus } from '../types';
 import { EditIcon, DeleteIcon, WhatsAppIcon } from './Icons';
 
@@ -10,6 +10,9 @@ interface TransactionTableProps {
     onShare: (id: string) => void;
     totalSale: number;
     isFiltering: boolean;
+    selectedIds: Set<string>;
+    onToggleSelect: (id: string) => void;
+    onToggleSelectAll: () => void;
 }
 
 const formatDuration = (start: string, end: string): string | null => {
@@ -71,7 +74,20 @@ const PurityBadge: React.FC<{ quality: string, size?: 'sm' | 'md' }> = React.mem
     return <>{quality}</>;
 });
 
-const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, onEdit, onDelete, onShare, totalSale, isFiltering }) => {
+const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, onEdit, onDelete, onShare, totalSale, isFiltering, selectedIds, onToggleSelect, onToggleSelectAll }) => {
+    
+    const headerCheckboxRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        if (headerCheckboxRef.current) {
+            const allVisibleIds = transactions.map(t => t.id);
+            const numSelected = allVisibleIds.filter(id => selectedIds.has(id)).length;
+            const allSelected = numSelected > 0 && numSelected === allVisibleIds.length;
+            
+            headerCheckboxRef.current.checked = allSelected;
+            headerCheckboxRef.current.indeterminate = numSelected > 0 && numSelected < allVisibleIds.length;
+        }
+    }, [selectedIds, transactions]);
     
     if (transactions.length === 0) {
         const message = isFiltering ? "No matching entries found." : "No entries for today.";
@@ -81,6 +97,7 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, onEdi
     const getStatusColor = (status: string) => {
         switch (status) {
             case TransactionStatus.Paid: return 'bg-green-100 text-green-800';
+            case TransactionStatus.Complect: return 'bg-blue-100 text-blue-800';
             case TransactionStatus.NotReturned: return 'bg-primary-gold/20 text-yellow-800';
             case TransactionStatus.Returned: return 'bg-highlight-red/20 text-highlight-red';
             default: return 'bg-gray-100 text-gray-800';
@@ -93,6 +110,15 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, onEdi
             <table className="min-w-full divide-y divide-primary-gold/20 hidden md:table">
                 <thead className="bg-ivory/50">
                     <tr>
+                        <th scope="col" className="px-6 py-3 text-left">
+                            <input 
+                                type="checkbox" 
+                                ref={headerCheckboxRef}
+                                onChange={onToggleSelectAll}
+                                className="h-4 w-4 rounded border-gray-300 text-primary-gold focus:ring-primary-gold" 
+                                aria-label="Select all transactions"
+                            />
+                        </th>
                         {['Given Time', 'Name', 'Item', 'Purity', 'Wt Given', 'Wt Return', 'Sale', 'Duration', 'Status', 'Actions'].map(header => (
                              <th key={header} scope="col" className="px-6 py-3 text-left text-xs font-bold text-accent-maroon uppercase tracking-wider">{header}</th>
                         ))}
@@ -100,7 +126,10 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, onEdi
                 </thead>
                 <tbody className="bg-white/50 divide-y divide-primary-gold/20">
                     {transactions.map((t) => (
-                        <tr key={t.id} className="hover:bg-primary-gold/10">
+                        <tr key={t.id} className={`hover:bg-primary-gold/10 ${selectedIds.has(t.id) ? 'bg-primary-gold/20' : ''}`}>
+                             <td className="px-6 py-4 whitespace-nowrap">
+                                <input type="checkbox" checked={selectedIds.has(t.id)} onChange={() => onToggleSelect(t.id)} className="h-4 w-4 rounded border-gray-300 text-primary-gold focus:ring-primary-gold" aria-label={`Select transaction ${t.id}`} />
+                            </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-text-main/80">{formatDateTime12Hour(t.date)}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-text-main">{t.name}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-text-main/80">{t.item}</td>
@@ -126,7 +155,7 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, onEdi
                 </tbody>
                 <tfoot>
                     <tr className="bg-ivory border-t-2 border-primary-gold/30">
-                        <td colSpan={6} className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-accent-maroon uppercase tracking-wider">
+                        <td colSpan={7} className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-accent-maroon uppercase tracking-wider">
                             Total Sale
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-left text-sm font-bold text-green-800">
@@ -141,9 +170,12 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, onEdi
             <div className="md:hidden">
                 <div className="space-y-4">
                     {transactions.map(t => (
-                        <div key={t.id} className="bg-white/70 rounded-lg shadow-md p-4 border-l-4 border-accent-maroon">
-                            <div className="flex justify-between items-start">
-                                <div>
+                        <div key={t.id} className={`relative bg-white/70 rounded-lg shadow-md p-4 border-l-4 border-accent-maroon ${selectedIds.has(t.id) ? 'ring-2 ring-primary-gold' : ''}`}>
+                             <div className="absolute top-3 right-3 z-10">
+                                <input type="checkbox" checked={selectedIds.has(t.id)} onChange={() => onToggleSelect(t.id)} className="h-5 w-5 rounded border-gray-400 text-primary-gold focus:ring-primary-gold" aria-label={`Select transaction ${t.id}`} />
+                            </div>
+                            <div className="flex justify-between items-start pr-8">
+                                <div onClick={() => onToggleSelect(t.id)} className="cursor-pointer flex-grow">
                                     <p className="font-bold text-lg text-text-main">{t.name}</p>
                                     <div className="flex items-center gap-2 mt-1">
                                       <p className="text-sm text-text-main/70">{t.item}</p>

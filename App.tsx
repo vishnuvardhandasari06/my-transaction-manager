@@ -12,6 +12,10 @@ import BottomNav from './components/BottomNav';
 const TransactionModal = lazy(() => import('./components/TransactionModal'));
 const SettingsDialog = lazy(() => import('./components/SettingsDialog'));
 const ConfirmationDialog = lazy(() => import('./components/ConfirmationDialog'));
+const BulkActionsBar = lazy(() => import('./components/BulkActionsBar'));
+const RateShareModal = lazy(() => import('./components/RateShareModal'));
+const CalculatorModal = lazy(() => import('./components/CalculatorModal'));
+
 
 // A simple fallback component for suspense.
 const SuspenseFallback = () => (
@@ -23,14 +27,17 @@ const SuspenseFallback = () => (
 // Define a type for managing all modals from a single state object.
 type ModalType =
   | { type: 'TRANSACTION_FORM'; transaction: Transaction | null }
-  | { type: 'CONFIRM_DELETE'; transactionId: string }
-  | { type: 'SETTINGS' };
+  | { type: 'CONFIRM_DELETE'; transactionIds: Set<string> }
+  | { type: 'SETTINGS' }
+  | { type: 'RATE_SHARE' }
+  | { type: 'CALCULATOR' };
 
 const App: React.FC = () => {
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [items, setItems] = useState<Item[]>([]);
     const [activeModal, setActiveModal] = useState<ModalType | null>(null);
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [searchTerm, setSearchTerm] = useState('');
     const [purityFilter, setPurityFilter] = useState('All');
     const [statusFilter, setStatusFilter] = useState('All');
@@ -64,10 +71,18 @@ const App: React.FC = () => {
             const data = await response.json();
             const { transactions: fetchedTransactions, customers: fetchedCustomers, items: fetchedItems } = data;
             
+            const formatForInput = (dateString: string): string => {
+                if (!dateString) return '';
+                // Convert 'YYYY-MM-DD HH:mm' from sheet to 'YYYY-MM-DDTHH:mm' for datetime-local input
+                return dateString.replace(' ', 'T');
+            };
+
             const activeTransactions = (Array.isArray(fetchedTransactions) ? fetchedTransactions : [])
                 .filter(t => t.status !== TransactionStatus.Deleted)
                 .map((t): Transaction => ({
                     ...t,
+                    date: formatForInput(t.date),
+                    returnTime: formatForInput(t.returnTime),
                     // Ensure 'quality' is consistently a string. Google Sheets may return it as a number
                     // if the cell content is purely numeric (e.g., 916), which causes errors with
                     // string methods like .trim() and breaks strict equality checks (e.g., 916 !== '916').
@@ -88,10 +103,14 @@ const App: React.FC = () => {
             if (error instanceof SyntaxError) {
                 errorMessage = 'Failed to parse response from Google Sheets. The script might not be returning valid JSON. Please check the script code and its deployment.';
             } else if (error instanceof TypeError) {
-                if (error.message.includes('Invalid URL')) {
+                 if (error.message.includes('Invalid URL')) {
                     errorMessage = 'The Google Sheets URL is invalid. Please check the URL format in Settings.';
                 } else { // Catches "Failed to fetch" which is often network or CORS
-                    errorMessage = 'Network Error: Could not connect. This might be a CORS issue or loss of internet. Please check deployment settings (especially "Who has access") and your connection.';
+                    if (!navigator.onLine) {
+                        errorMessage = 'Network Error: You appear to be offline. Please check your internet connection and try again.';
+                    } else {
+                        errorMessage = 'Connection Error: Could not fetch data. This is often a CORS or firewall issue. Please check: 1) Your internet connection. 2) The Web App URL in Settings is correct. 3) The script is deployed with "Execute as: Me" & "Who has access: Anyone". 4) You created a **new deployment** after any script changes.';
+                    }
                 }
             } else if (error.message.includes('Network response was not ok')) {
                 // Extract status code from the error message, e.g., "Network response was not ok (404)..."
@@ -132,22 +151,17 @@ const App: React.FC = () => {
     useEffect(() => {
         fetchData();
     }, [fetchData]);
-
-    const postToSheet = useCallback(async (action: string, payload: any): Promise<boolean> => {
+    
+    const performSheetUpdate = useCallback(async (action: string, payload: any): Promise<{success: boolean, error?: string}> => {
         if (!sheetsUrl) {
-            showNotification('Please set up Google Sheets URL in settings to save data.', 'error');
-            return false;
+            const error = 'Please set up Google Sheets URL in settings to save data.';
+            return { success: false, error };
         }
-        setLoading(true);
+
         try {
             const response = await fetch(sheetsUrl, {
                 method: 'POST',
-                headers: {
-                    // IMPORTANT: Use 'text/plain' to avoid CORS preflight (OPTIONS) requests
-                    // that Google Apps Script does not handle well. The script on the server
-                    // side will then parse this text body as JSON.
-                    'Content-Type': 'text/plain',
-                },
+                headers: { 'Content-Type': 'text/plain' },
                 body: JSON.stringify({ action, payload }),
             });
 
@@ -160,35 +174,57 @@ const App: React.FC = () => {
                 throw new Error(`The script reported an issue: ${result.message || 'Unknown error'}`);
             }
 
-            await fetchData({ quiet: true });
-            return true;
+            return { success: true };
         } catch (error: any) {
             console.error(`Failed to perform action ${action}:`, error);
             const friendlyAction = action.replace(/_/g, ' ').toLowerCase();
-            let errorMessage = `Failed to ${friendlyAction}. An unexpected error occurred.`;
+            let errorMessage: string;
 
-            if (error instanceof TypeError) { // This often indicates a CORS or network issue
-                errorMessage = `Action failed due to a network error (likely CORS). Please double-check the script deployment instructions and ensure you are using the provided Apps Script code from Settings.`;
+            if (error instanceof TypeError) {
+                if (!navigator.onLine) {
+                    errorMessage = `Action failed because you seem to be offline. Please check your connection.`;
+                } else {
+                    errorMessage = `Action failed due to a network error (likely CORS or firewall). Please ensure your Google Apps Script is deployed with "Who has access: Anyone". A new deployment is required after any script change.`;
+                }
             } else if (error instanceof SyntaxError) {
-                errorMessage = `Received an invalid response from the server when trying to ${friendlyAction}.`;
+                errorMessage = `Received an invalid response from the server when trying to ${friendlyAction}. The script might have an error.`;
             } else {
                 errorMessage = error.message;
             }
-            showNotification(errorMessage, 'error');
-            setLoading(false);
-            return false;
+            return { success: false, error: errorMessage };
         }
-    }, [sheetsUrl, fetchData, showNotification]);
+    }, [sheetsUrl]);
 
 
     const handleSave = useCallback(async (transaction: Transaction) => {
         const isEditing = transactions.some(t => t.id === transaction.id);
-        const success = await postToSheet('SAVE_TRANSACTION', transaction);
-        if (success) {
-            showNotification(isEditing ? 'Data updated successfully!' : 'New entry added successfully!');
-            setActiveModal(null);
+        const previousTransactions = transactions;
+
+        // Optimistic UI update
+        const newTransactions = isEditing
+            ? transactions.map(t => (t.id === transaction.id ? transaction : t))
+            // Sort by date after adding a new item to maintain order
+            : [...transactions, transaction].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        setTransactions(newTransactions);
+        setActiveModal(null);
+        showNotification(isEditing ? 'Data updated successfully!' : 'New entry added successfully!');
+        
+        // Background sync
+        const { success, error } = await performSheetUpdate('SAVE_TRANSACTION', transaction);
+
+        if (!success) {
+            // Rollback on failure
+            setTransactions(previousTransactions);
+            showNotification(error || 'Failed to save. Your changes have been reverted.', 'error');
+            // Re-open modal to prevent data loss for the user
+            setActiveModal({ type: 'TRANSACTION_FORM', transaction });
+        } else {
+            // On success, perform a quiet refresh to get any updates from other users
+            // and ensure perfect data consistency without showing a loader.
+            await fetchData({ quiet: true });
         }
-    }, [transactions, postToSheet, showNotification]);
+    }, [transactions, performSheetUpdate, showNotification, fetchData]);
 
     const handleEdit = useCallback((id: string) => {
         const transactionToEdit = transactions.find(t => t.id === id);
@@ -198,7 +234,7 @@ const App: React.FC = () => {
     }, [transactions]);
 
     const handleDelete = useCallback((id: string) => {
-        setActiveModal({ type: 'CONFIRM_DELETE', transactionId: id });
+        setActiveModal({ type: 'CONFIRM_DELETE', transactionIds: new Set([id]) });
     }, []);
 
     const handleShareViaWhatsApp = useCallback((id: string) => {
@@ -219,6 +255,7 @@ const App: React.FC = () => {
         const formatDate = (dateString: string) => {
             if (!dateString) return '-';
             try {
+                // The date string is now 'YYYY-MM-DDTHH:mm', which new Date() can parse.
                 return new Date(dateString).toLocaleString('en-US', {
                     year: 'numeric',
                     month: 'short',
@@ -248,22 +285,34 @@ Status: ${transaction.status}
 
     const confirmDelete = useCallback(async () => {
         if (activeModal?.type === 'CONFIRM_DELETE') {
-            const { transactionId } = activeModal;
-            const transactionToDelete = transactions.find(t => t.id === transactionId);
-            if (!transactionToDelete) {
-                showNotification('Could not find the transaction to delete.', 'error');
-                setActiveModal(null);
-                return;
-            }
+            const { transactionIds } = activeModal;
+            const previousTransactions = transactions;
 
-            const updatedTransaction = { ...transactionToDelete, status: TransactionStatus.Deleted };
-            const success = await postToSheet('SAVE_TRANSACTION', updatedTransaction);
-            if (success) {
-                showNotification('Entry hidden successfully!');
-                setActiveModal(null);
+            // Prepare payload for background sync
+            const transactionsToUpdate = previousTransactions
+                .filter(t => transactionIds.has(t.id))
+                .map(t => ({ ...t, status: TransactionStatus.Deleted }));
+
+            // Optimistic UI Update
+            const newTransactions = previousTransactions.filter(t => !transactionIds.has(t.id));
+            setTransactions(newTransactions);
+            showNotification(`${transactionIds.size} ${transactionIds.size > 1 ? 'entries' : 'entry'} hidden successfully!`);
+            setSelectedIds(new Set());
+            setActiveModal(null);
+
+            // Background sync
+            const { success, error } = await performSheetUpdate('BULK_SAVE_TRANSACTIONS', transactionsToUpdate);
+            
+            if (!success) {
+                // Rollback on failure
+                setTransactions(previousTransactions);
+                setSelectedIds(transactionIds); // Re-select the items that failed to delete
+                showNotification(error || 'Failed to hide entries. Your changes have been reverted.', 'error');
+            } else {
+                await fetchData({ quiet: true });
             }
         }
-    }, [activeModal, postToSheet, showNotification, transactions]);
+    }, [activeModal, transactions, showNotification, performSheetUpdate, fetchData]);
 
     const isFiltering = useMemo(() => {
         return debouncedSearchTerm.trim() !== '' || purityFilter !== 'All' || statusFilter !== 'All' || startDate !== '' || endDate !== '';
@@ -306,6 +355,63 @@ Status: ${transaction.status}
         // Sort the final results chronologically
         return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     }, [transactions, debouncedSearchTerm, purityFilter, statusFilter, startDate, endDate, isFiltering]);
+
+    const handleToggleSelect = useCallback((id: string) => {
+        setSelectedIds(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(id)) {
+                newSet.delete(id);
+            } else {
+                newSet.add(id);
+            }
+            return newSet;
+        });
+    }, []);
+
+    const handleToggleSelectAll = useCallback(() => {
+        setSelectedIds(prev => {
+            const allVisibleIds = filteredTransactions.map(t => t.id);
+            const allSelected = allVisibleIds.length > 0 && allVisibleIds.every(id => prev.has(id));
+            if (allSelected) {
+                return new Set();
+            } else {
+                return new Set(allVisibleIds);
+            }
+        });
+    }, [filteredTransactions]);
+
+    const handleBulkMarkPaid = useCallback(async () => {
+        const previousTransactions = [...transactions];
+        const previousSelectedIds = new Set(selectedIds);
+
+        // Prepare payload for background sync
+        const transactionsToUpdate = previousTransactions
+            .filter(t => selectedIds.has(t.id))
+            .map(t => ({ ...t, status: TransactionStatus.Paid }));
+
+        // Optimistic UI Update
+        const newTransactions = previousTransactions.map(t => {
+            if (selectedIds.has(t.id)) {
+                return { ...t, status: TransactionStatus.Paid };
+            }
+            return t;
+        });
+        setTransactions(newTransactions);
+        showNotification(`${selectedIds.size} ${selectedIds.size > 1 ? 'entries' : 'entry'} marked as Paid.`);
+        setSelectedIds(new Set());
+        
+        // Background sync
+        const { success, error } = await performSheetUpdate('BULK_SAVE_TRANSACTIONS', transactionsToUpdate);
+        
+        if (!success) {
+            // Rollback on failure
+            setTransactions(previousTransactions);
+            setSelectedIds(previousSelectedIds);
+            showNotification(error || 'Failed to mark as paid. Your changes have been reverted.', 'error');
+        } else {
+            await fetchData({ quiet: true });
+        }
+    }, [selectedIds, transactions, showNotification, performSheetUpdate, fetchData]);
 
     const handleExportData = useCallback(() => {
         if (filteredTransactions.length === 0) {
@@ -392,23 +498,46 @@ Status: ${transaction.status}
 
     const handleSaveNewCustomer = useCallback(async (newCustomer: { name: string, phone: string }) => {
         if (newCustomer.name && !customers.some(c => c.name.toLowerCase() === newCustomer.name.toLowerCase())) {
-            await postToSheet('SAVE_CUSTOMER', newCustomer);
+            const previousCustomers = customers;
+            // Optimistic update
+            setCustomers(prev => [...prev, newCustomer].sort((a, b) => a.name.localeCompare(b.name)));
+            
+            // Background sync
+            const { success, error } = await performSheetUpdate('SAVE_CUSTOMER', newCustomer);
+            if (!success) {
+                // Rollback on failure
+                setCustomers(previousCustomers);
+                showNotification(error || `Failed to save new customer "${newCustomer.name}".`, 'error');
+            }
         }
-    }, [customers, postToSheet]);
+    }, [customers, performSheetUpdate, showNotification]);
 
     const handleSaveNewItem = useCallback(async (newItemName: string) => {
         if (newItemName && !items.some(i => i.name.toLowerCase() === newItemName.toLowerCase())) {
-            await postToSheet('SAVE_ITEM', { name: newItemName });
+            const newItem = { name: newItemName };
+            const previousItems = items;
+            // Optimistic update
+            setItems(prev => [...prev, newItem].sort((a, b) => a.name.localeCompare(b.name)));
+
+            // Background sync
+            const { success, error } = await performSheetUpdate('SAVE_ITEM', newItem);
+            if (!success) {
+                // Rollback on failure
+                setItems(previousItems);
+                showNotification(error || `Failed to save new item "${newItemName}".`, 'error');
+            }
         }
-    }, [items, postToSheet]);
+    }, [items, performSheetUpdate, showNotification]);
 
     const handleAddNew = useCallback(() => setActiveModal({ type: 'TRANSACTION_FORM', transaction: null }), []);
     const handleCancelModal = useCallback(() => setActiveModal(null), []);
     const handleOpenSettings = useCallback(() => setActiveModal({ type: 'SETTINGS' }), []);
+    const handleOpenRateModal = useCallback(() => setActiveModal({ type: 'RATE_SHARE' }), []);
+    const handleOpenCalculator = useCallback(() => setActiveModal({ type: 'CALCULATOR' }), []);
 
     return (
         <div className="min-h-screen pb-24 md:pb-0">
-            <Header onOpenSettings={handleOpenSettings} />
+            <Header onOpenSettings={handleOpenSettings} onOpenRateModal={handleOpenRateModal} onOpenCalculator={handleOpenCalculator} />
             <main className="container mx-auto p-4 md:p-6 lg:p-8">
                  {loading && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]" aria-label="Loading">
@@ -449,8 +578,8 @@ Status: ${transaction.status}
                             isOpen={true}
                             onClose={handleCancelModal}
                             onConfirm={confirmDelete}
-                            title="Hide Entry"
-                            message="Are you sure you want to hide this entry? It will be removed from view but will remain in your Google Sheet."
+                            title={`Hide ${activeModal.transactionIds.size > 1 ? 'Entries' : 'Entry'}`}
+                            message={`Are you sure you want to hide ${activeModal.transactionIds.size} selected ${activeModal.transactionIds.size > 1 ? 'entries' : 'entry'}? They will be removed from view but will remain in your Google Sheet.`}
                         />
                     )}
                     {activeModal?.type === 'TRANSACTION_FORM' && (
@@ -463,6 +592,18 @@ Status: ${transaction.status}
                             onSaveNewCustomer={handleSaveNewCustomer}
                             items={items.map(i => i.name)}
                             onSaveNewItem={handleSaveNewItem}
+                        />
+                    )}
+                    {activeModal?.type === 'RATE_SHARE' && (
+                        <RateShareModal
+                            isOpen={true}
+                            onClose={handleCancelModal}
+                        />
+                    )}
+                    {activeModal?.type === 'CALCULATOR' && (
+                        <CalculatorModal
+                            isOpen={true}
+                            onClose={handleCancelModal}
                         />
                     )}
                 </Suspense>
@@ -530,6 +671,9 @@ Status: ${transaction.status}
                           onShare={handleShareViaWhatsApp}
                           totalSale={totalSale}
                           isFiltering={isFiltering}
+                          selectedIds={selectedIds}
+                          onToggleSelect={handleToggleSelect}
+                          onToggleSelectAll={handleToggleSelectAll}
                       />
                     ) : (
                         <div className="text-center py-16 px-6">
@@ -553,7 +697,18 @@ Status: ${transaction.status}
                 </div>
             </main>
             
-            {activeModal?.type !== 'TRANSACTION_FORM' && (
+            <Suspense fallback={null}>
+                {selectedIds.size > 0 && (
+                    <BulkActionsBar 
+                        count={selectedIds.size}
+                        onClearSelection={() => setSelectedIds(new Set())}
+                        onBulkDelete={() => setActiveModal({ type: 'CONFIRM_DELETE', transactionIds: selectedIds })}
+                        onBulkMarkPaid={handleBulkMarkPaid}
+                    />
+                )}
+            </Suspense>
+            
+            {activeModal?.type !== 'TRANSACTION_FORM' && selectedIds.size === 0 && (
                 <BottomNav 
                     onAddNew={handleAddNew}
                     onExport={handleExportData}

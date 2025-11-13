@@ -5,6 +5,7 @@ export enum TransactionStatus {
     Paid = 'Paid',
     NotReturned = 'Not Returned',
     Returned = 'Returned',
+    Complect = 'Complect',
     Deleted = 'Deleted'
 }
 
