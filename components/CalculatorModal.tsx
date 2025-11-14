@@ -67,7 +67,7 @@ const GoldCalculator: React.FC = () => {
 
         const price = parseFloat(goldPrice);
         const weight = parseFloat(goldWeight);
-        const purityDecimal = purity === '916' ? 0.916 : 0.75;
+        const purityDecimal = purity === '916' ? 0.92 : 0.75;
 
         const min = parseInt(minPercent, 10);
         const max = parseInt(maxPercent, 10);

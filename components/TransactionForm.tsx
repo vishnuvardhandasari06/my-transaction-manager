@@ -152,27 +152,40 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
         }
     }, [transaction.weightGiven, transaction.weightReturn, lastEditedNumericField, transaction.sale]);
 
-    // Effect to auto-calculate Weight Return from Sale.
+    // Effect to auto-calculate Weight Return and Return Time from Sale.
     useEffect(() => {
         if (lastEditedNumericField !== 'sale') return;
 
         const given = transaction.weightGiven;
         const sale = transaction.sale;
 
+        // Only act if a sale value is present or being cleared by the user.
         if (given !== null && sale !== null) {
             // Ensure given is not less than sale to avoid negative return weight
             if (given < sale) {
+                // If sale is invalid, clear return weight and time.
+                setTransaction(prev => ({ ...prev, weightReturn: null, returnTime: '' }));
                 return;
             }
 
-            let newReturn = given - sale;
-            newReturn = parseFloat(newReturn.toFixed(3));
+            const newReturn = parseFloat((given - sale).toFixed(3));
+            const isPositive = newReturn > 0;
             
-            if (newReturn !== transaction.weightReturn) {
-                setTransaction(prev => ({ ...prev, weightReturn: newReturn }));
-            }
+            // Unconditionally update return weight and time based on the new sale value.
+            setTransaction(prev => ({ 
+                ...prev, 
+                weightReturn: newReturn,
+                returnTime: isPositive ? (() => {
+                    const now = new Date();
+                    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+                    return now.toISOString().slice(0, 16);
+                })() : ''
+            }));
+        // If the user clears the sale input, we should also clear the auto-calculated return values.
+        } else if (sale === null) {
+             setTransaction(prev => ({ ...prev, weightReturn: null, returnTime: '' }));
         }
-    }, [transaction.sale, transaction.weightGiven, lastEditedNumericField, transaction.weightReturn]);
+    }, [transaction.sale, transaction.weightGiven, lastEditedNumericField]);
 
     // Effect to automatically update the transaction status based on weight inputs.
     useEffect(() => {

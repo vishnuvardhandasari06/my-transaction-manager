@@ -31,7 +31,7 @@ const RateShareModal: React.FC<RateShareModalProps> = ({ isOpen, onClose }) => {
         const gold_price_24k = parseFloat(goldPrice);
         const silver_price_1kg = parseFloat(silverPrice);
 
-        const gold_22k = gold_price_24k * 0.916;
+        const gold_22k = gold_price_24k * 0.92;
         const ara_kasu = gold_22k * 4;
         const kasu = gold_22k * 8;
         
