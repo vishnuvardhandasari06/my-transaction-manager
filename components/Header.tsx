@@ -1,14 +1,15 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { MenuIcon, SettingsIcon, StarIcon, CalculatorIcon } from './Icons';
+import { MenuIcon, SettingsIcon, StarIcon, CalculatorIcon, StatisticsIcon } from './Icons';
 
 interface HeaderProps {
     onOpenSettings: () => void;
     onOpenRateModal: () => void;
     onOpenCalculator: () => void;
+    onOpenStatistics: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = React.memo(({ onOpenSettings, onOpenRateModal, onOpenCalculator }) => {
+export const Header: React.FC<HeaderProps> = React.memo(({ onOpenSettings, onOpenRateModal, onOpenCalculator, onOpenStatistics }) => {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
 
@@ -42,6 +43,11 @@ export const Header: React.FC<HeaderProps> = React.memo(({ onOpenSettings, onOpe
 
     const handleCalculatorClick = () => {
         onOpenCalculator();
+        setIsMenuOpen(false);
+    };
+
+    const handleStatisticsClick = () => {
+        onOpenStatistics();
         setIsMenuOpen(false);
     };
 
@@ -88,6 +94,14 @@ export const Header: React.FC<HeaderProps> = React.memo(({ onOpenSettings, onOpe
                                 >
                                     <CalculatorIcon />
                                     <span>Calculator</span>
+                                </button>
+                                <button
+                                    onClick={handleStatisticsClick}
+                                    className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-text-main hover:bg-primary-gold/10"
+                                    role="menuitem"
+                                >
+                                    <StatisticsIcon />
+                                    <span>Statistics</span>
                                 </button>
                                 <button
                                     onClick={handleSettingsClick}

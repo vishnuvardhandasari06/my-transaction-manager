@@ -75,6 +75,15 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
     const [errors, setErrors] = useState<Partial<Record<keyof Transaction, string>>>({});
     const initialStateRef = useRef<Transaction | null>(null);
 
+    // State for the autocomplete name input
+    const [nameSuggestions, setNameSuggestions] = useState<Customer[]>([]);
+    const [isNameSuggestionsVisible, setIsNameSuggestionsVisible] = useState(false);
+    
+    // State for the autocomplete item input
+    const [itemSuggestions, setItemSuggestions] = useState<string[]>([]);
+    const [isItemSuggestionsVisible, setIsItemSuggestionsVisible] = useState(false);
+
+
     const getAutoSaveKey = useCallback((tx: Transaction | null) => `autosaved-transaction-${tx?.id || 'new'}`, []);
 
 
@@ -255,6 +264,34 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
                 return newErrors;
             });
         }
+        
+        if (name === 'name') {
+            setTransaction(prev => ({ ...prev, name: value }));
+            if (value.trim()) {
+                const filtered = customers.filter(c =>
+                    c.name.toLowerCase().includes(value.toLowerCase())
+                );
+                setNameSuggestions(filtered);
+                setIsNameSuggestionsVisible(true);
+            } else {
+                setIsNameSuggestionsVisible(false);
+            }
+            return;
+        }
+
+        if (name === 'item') {
+            setTransaction(prev => ({ ...prev, item: value }));
+            if (value.trim()) {
+                const filtered = localItems.filter(i =>
+                    i.toLowerCase().includes(value.toLowerCase())
+                );
+                setItemSuggestions(filtered);
+                setIsItemSuggestionsVisible(true);
+            } else {
+                setIsItemSuggestionsVisible(false);
+            }
+            return;
+        }
 
         if (name === 'sale') {
             setLastEditedNumericField('sale');
@@ -295,6 +332,76 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
             }));
         } else {
             setTransaction(prev => ({ ...prev, [name]: value }));
+        }
+    };
+    
+    const handleNameInputFocus = () => {
+        if (transaction.name) {
+            const filtered = customers.filter(c =>
+                c.name.toLowerCase().includes(transaction.name.toLowerCase())
+            );
+            setNameSuggestions(filtered);
+        } else {
+            setNameSuggestions([]);
+        }
+        setIsNameSuggestionsVisible(true);
+    };
+    
+    const handleNameInputDoubleClick = () => {
+        setNameSuggestions(customers);
+        setIsNameSuggestionsVisible(true);
+    };
+    
+    const handleNameInputBlur = () => {
+        setTimeout(() => {
+            setIsNameSuggestionsVisible(false);
+        }, 200);
+    };
+
+    const handleNameSuggestionClick = (customer: Customer) => {
+        setTransaction(prev => ({ ...prev, name: customer.name }));
+        setIsNameSuggestionsVisible(false);
+        if (errors.name) {
+            setErrors(prev => {
+                const newErrors = { ...prev };
+                delete newErrors.name;
+                return newErrors;
+            });
+        }
+    };
+
+    const handleItemInputFocus = () => {
+        if (transaction.item) {
+            const filtered = localItems.filter(i =>
+                i.toLowerCase().includes(transaction.item.toLowerCase())
+            );
+            setItemSuggestions(filtered);
+        } else {
+            setItemSuggestions([]);
+        }
+        setIsItemSuggestionsVisible(true);
+    };
+
+    const handleItemInputDoubleClick = () => {
+        setItemSuggestions(localItems);
+        setIsItemSuggestionsVisible(true);
+    };
+
+    const handleItemInputBlur = () => {
+        setTimeout(() => {
+            setIsItemSuggestionsVisible(false);
+        }, 200);
+    };
+
+    const handleItemSuggestionClick = (item: string) => {
+        setTransaction(prev => ({ ...prev, item: item }));
+        setIsItemSuggestionsVisible(false);
+        if (errors.item) {
+            setErrors(prev => {
+                const newErrors = { ...prev };
+                delete newErrors.item;
+                return newErrors;
+            });
         }
     };
     
@@ -375,36 +482,6 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
         </div>
     );
     
-    const renderSelectWithAdd = (id: 'name' | 'item', label: string, options: string[], className = '', iconClassName = '') => (
-        <div className={className}>
-            <label htmlFor={id} className="block text-sm font-medium text-text-main/90">{label}</label>
-            <div className="relative mt-1">
-                <select
-                    id={id}
-                    name={id}
-                    value={transaction[id]}
-                    onChange={handleChange}
-                    className={`block w-full pl-3 pr-10 py-2 text-base bg-ivory/50 focus:outline-none focus:ring-primary-gold focus:border-primary-gold sm:text-sm rounded-md appearance-none border ${errors[id] ? 'border-highlight-red text-highlight-red' : 'border-primary-gold/50'}`}
-                >
-                    <option value="">Select {label}</option>
-                    {options.map(option => (
-                        <option key={option} value={option}>{option}</option>
-                    ))}
-                </select>
-                <button
-                    type="button"
-                    onClick={() => handleAddNewOption(id)}
-                    className="absolute inset-y-0 right-0 flex items-center pr-2 text-gray-400 hover:text-primary-gold"
-                    aria-label={`Add new ${id}`}
-                    title={`Add new ${id}`}
-                >
-                    <AddCircleIcon className={iconClassName || 'h-5 w-5'} />
-                </button>
-            </div>
-            {errors[id] && <p className="mt-1 text-xs text-highlight-red">{errors[id]}</p>}
-        </div>
-    );
-    
     return (
         <>
             <AddNameDialog
@@ -421,7 +498,47 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
             />
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {renderSelectWithAdd('name', 'Name', customers.map(c => c.name), '', 'h-8 w-8')}
+                    <div className="relative">
+                        <label htmlFor="name" className="block text-sm font-medium text-text-main/90">Name</label>
+                        <div className="relative mt-1">
+                            <input
+                                type="text"
+                                id="name"
+                                name="name"
+                                value={transaction.name}
+                                onChange={handleChange}
+                                onFocus={handleNameInputFocus}
+                                onBlur={handleNameInputBlur}
+                                onDoubleClick={handleNameInputDoubleClick}
+                                placeholder="Type or double tap for full list"
+                                autoComplete="off"
+                                className={`block w-full pl-3 pr-10 py-2 text-base bg-ivory/50 border ${errors.name ? 'border-highlight-red text-highlight-red' : 'border-primary-gold/50'} rounded-md shadow-sm focus:outline-none focus:ring-primary-gold focus:border-primary-gold sm:text-sm`}
+                            />
+                            <button
+                                type="button"
+                                onClick={() => handleAddNewOption('name')}
+                                className="absolute inset-y-0 right-0 flex items-center pr-2 text-gray-400 hover:text-primary-gold"
+                                aria-label="Add new name"
+                                title="Add new name"
+                            >
+                                <AddCircleIcon className="h-8 w-8" />
+                            </button>
+                        </div>
+                        {isNameSuggestionsVisible && nameSuggestions.length > 0 && (
+                            <ul className="absolute z-10 w-full bg-ivory border border-primary-gold/50 rounded-md shadow-lg mt-1 max-h-60 overflow-auto">
+                                {nameSuggestions.map(customer => (
+                                    <li
+                                        key={customer.name}
+                                        onMouseDown={() => handleNameSuggestionClick(customer)}
+                                        className="cursor-pointer px-3 py-2 hover:bg-primary-gold/10"
+                                    >
+                                        {customer.name}
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                        {errors.name && <p className="mt-1 text-xs text-highlight-red">{errors.name}</p>}
+                    </div>
                     <div>
                         <label htmlFor="phone" className="block text-sm font-medium text-text-main/90">Phone Number</label>
                         <div className="mt-1">
@@ -438,7 +555,47 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onSave, onCancel, exi
                     </div>
                 </div>
 
-                {renderSelectWithAdd('item', 'Item', localItems, '', 'h-8 w-8')}
+                <div className="relative">
+                    <label htmlFor="item" className="block text-sm font-medium text-text-main/90">Item</label>
+                    <div className="relative mt-1">
+                        <input
+                            type="text"
+                            id="item"
+                            name="item"
+                            value={transaction.item}
+                            onChange={handleChange}
+                            onFocus={handleItemInputFocus}
+                            onBlur={handleItemInputBlur}
+                            onDoubleClick={handleItemInputDoubleClick}
+                            placeholder="Type or double tap for full list"
+                            autoComplete="off"
+                            className={`block w-full pl-3 pr-10 py-2 text-base bg-ivory/50 border ${errors.item ? 'border-highlight-red text-highlight-red' : 'border-primary-gold/50'} rounded-md shadow-sm focus:outline-none focus:ring-primary-gold focus:border-primary-gold sm:text-sm`}
+                        />
+                        <button
+                            type="button"
+                            onClick={() => handleAddNewOption('item')}
+                            className="absolute inset-y-0 right-0 flex items-center pr-2 text-gray-400 hover:text-primary-gold"
+                            aria-label="Add new item"
+                            title="Add new item"
+                        >
+                            <AddCircleIcon className="h-8 w-8" />
+                        </button>
+                    </div>
+                    {isItemSuggestionsVisible && itemSuggestions.length > 0 && (
+                        <ul className="absolute z-10 w-full bg-ivory border border-primary-gold/50 rounded-md shadow-lg mt-1 max-h-60 overflow-auto">
+                            {itemSuggestions.map(item => (
+                                <li
+                                    key={item}
+                                    onMouseDown={() => handleItemSuggestionClick(item)}
+                                    className="cursor-pointer px-3 py-2 hover:bg-primary-gold/10"
+                                >
+                                    {item}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                    {errors.item && <p className="mt-1 text-xs text-highlight-red">{errors.item}</p>}
+                </div>
                 <div>
                     <label htmlFor="quality" className="block text-sm font-medium text-text-main/90">Purity</label>
                     <select

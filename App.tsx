@@ -15,6 +15,7 @@ const ConfirmationDialog = lazy(() => import('./components/ConfirmationDialog'))
 const BulkActionsBar = lazy(() => import('./components/BulkActionsBar'));
 const RateShareModal = lazy(() => import('./components/RateShareModal'));
 const CalculatorModal = lazy(() => import('./components/CalculatorModal'));
+const StatisticsModal = lazy(() => import('./components/StatisticsModal'));
 
 
 // A simple fallback component for suspense.
@@ -30,7 +31,8 @@ type ModalType =
   | { type: 'CONFIRM_DELETE'; transactionIds: Set<string> }
   | { type: 'SETTINGS' }
   | { type: 'RATE_SHARE' }
-  | { type: 'CALCULATOR' };
+  | { type: 'CALCULATOR' }
+  | { type: 'STATISTICS' };
 
 const App: React.FC = () => {
     const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -66,7 +68,7 @@ const App: React.FC = () => {
         }
         try {
             const response = await fetch(sheetsUrl);
-            if (!response.ok) throw new Error(`Network response was not ok (${response.status}). Check script deployment permissions.`);
+            if (!response.ok) throw new Error(`Network response was not ok (${response.status})`);
             
             const data = await response.json();
             const { transactions: fetchedTransactions, customers: fetchedCustomers, items: fetchedItems } = data;
@@ -109,7 +111,7 @@ const App: React.FC = () => {
                     if (!navigator.onLine) {
                         errorMessage = 'Network Error: You appear to be offline. Please check your internet connection and try again.';
                     } else {
-                        errorMessage = 'Connection Error: Could not fetch data. This is often a CORS or firewall issue. Please check: 1) Your internet connection. 2) The Web App URL in Settings is correct. 3) The script is deployed with "Execute as: Me" & "Who has access: Anyone". 4) You created a **new deployment** after any script changes.';
+                        errorMessage = 'Connection failed. This is usually a setup issue. Please double-check in Google Apps Script: 1. Did you create a NEW deployment after pasting the code? 2. Is "Who has access" set to ANYONE? 3. Is the Web App URL from your LATEST deployment correct?';
                     }
                 }
             } else if (error.message.includes('Network response was not ok')) {
@@ -123,7 +125,7 @@ const App: React.FC = () => {
                             errorMessage = `Permission Error (${status}): Access denied. Ensure script is deployed with "Execute as: Me" and "Who has access: Anyone". You may need to re-deploy.`;
                             break;
                         case 404:
-                            errorMessage = `Not Found (${status}): The Web App URL is incorrect. Please double-check it in Settings.`;
+                            errorMessage = `Not Found (404): The Web App URL is incorrect or points to an old deployment. Please double-check the URL in Settings. Remember to create a NEW deployment in Apps Script after every code change to get the latest URL.`;
                             break;
                         case 302: // Google often redirects to a login page if auth is wrong
                             errorMessage = `Redirect Error (302): This may mean you need to re-authorize the script or redeploy with correct permissions.`;
@@ -166,7 +168,7 @@ const App: React.FC = () => {
             });
 
             if (!response.ok) {
-                throw new Error(`Server error (${response.status}). Please check your Google Apps Script and its deployment settings.`);
+                throw new Error(`Server error (${response.status})`);
             }
 
             const result = await response.json();
@@ -177,19 +179,44 @@ const App: React.FC = () => {
             return { success: true };
         } catch (error: any) {
             console.error(`Failed to perform action ${action}:`, error);
-            const friendlyAction = action.replace(/_/g, ' ').toLowerCase();
+            const friendlyAction = `save your data`;
             let errorMessage: string;
 
             if (error instanceof TypeError) {
                 if (!navigator.onLine) {
                     errorMessage = `Action failed because you seem to be offline. Please check your connection.`;
                 } else {
-                    errorMessage = `Action failed due to a network error (likely CORS or firewall). Please ensure your Google Apps Script is deployed with "Who has access: Anyone". A new deployment is required after any script change.`;
+                    errorMessage = `Save failed due to a connection issue. Please check your Google Script deployment: "Who has access" must be set to "Anyone", and you must create a new deployment after any script changes.`;
                 }
             } else if (error instanceof SyntaxError) {
                 errorMessage = `Received an invalid response from the server when trying to ${friendlyAction}. The script might have an error.`;
+            } else if (error.message.includes('Server error')) { // Catch our custom error from the 'try' block
+                const match = error.message.match(/\((\d{3})\)/);
+                if (match) {
+                    const status = parseInt(match[1], 10);
+                    switch (status) {
+                        case 401:
+                        case 403:
+                            errorMessage = `Save failed. Permission Error (${status}): Check that your script is deployed with "Execute as: Me" and "Who has access: Anyone".`;
+                            break;
+                        case 404:
+                            errorMessage = `Save failed. Not Found (404): The Web App URL is incorrect. Did you create a NEW deployment after changing the script? Please check the URL in Settings.`;
+                            break;
+                        case 302:
+                            errorMessage = `Save failed. Redirect Error (302): This may be an authorization issue. Please try re-deploying your script.`;
+                            break;
+                        default:
+                            if (status >= 500) {
+                                errorMessage = `Save failed. Server Error (${status}): The Google Apps Script failed. Check its execution logs in your Google account.`;
+                            } else {
+                                errorMessage = `Save failed with status ${status}. Please verify your URL and deployment settings.`;
+                            }
+                    }
+                } else {
+                    errorMessage = `Failed to ${friendlyAction}. An unknown server error occurred.`;
+                }
             } else {
-                errorMessage = error.message;
+                errorMessage = error.message; // Fallback for other errors like script-reported issues
             }
             return { success: false, error: errorMessage };
         }
@@ -534,10 +561,11 @@ Status: ${transaction.status}
     const handleOpenSettings = useCallback(() => setActiveModal({ type: 'SETTINGS' }), []);
     const handleOpenRateModal = useCallback(() => setActiveModal({ type: 'RATE_SHARE' }), []);
     const handleOpenCalculator = useCallback(() => setActiveModal({ type: 'CALCULATOR' }), []);
+    const handleOpenStatistics = useCallback(() => setActiveModal({ type: 'STATISTICS' }), []);
 
     return (
         <div className="min-h-screen pb-24 md:pb-0">
-            <Header onOpenSettings={handleOpenSettings} onOpenRateModal={handleOpenRateModal} onOpenCalculator={handleOpenCalculator} />
+            <Header onOpenSettings={handleOpenSettings} onOpenRateModal={handleOpenRateModal} onOpenCalculator={handleOpenCalculator} onOpenStatistics={handleOpenStatistics} />
             <main className="container mx-auto p-4 md:p-6 lg:p-8">
                  {loading && (
                     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]" aria-label="Loading">
@@ -604,6 +632,15 @@ Status: ${transaction.status}
                         <CalculatorModal
                             isOpen={true}
                             onClose={handleCancelModal}
+                        />
+                    )}
+                    {activeModal?.type === 'STATISTICS' && (
+                        <StatisticsModal
+                            isOpen={true}
+                            onClose={handleCancelModal}
+                            transactions={transactions}
+                            customers={customers}
+                            items={items}
                         />
                     )}
                 </Suspense>
